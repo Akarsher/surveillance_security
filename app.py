@@ -3,6 +3,7 @@ import os
 import face_recognition
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
+from datetime import datetime
 
 app = FastAPI()
 
@@ -47,10 +48,22 @@ camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 camera.set(cv2.CAP_PROP_FPS, 10)
 
 # -----------------------------
+# Alert configuration
+# -----------------------------
+ALERT_DEBOUNCE_LIMIT = 3
+violation_counter = 0
+alert_active = False
+
+SNAPSHOT_DIR = "snapshots"
+os.makedirs(SNAPSHOT_DIR, exist_ok=True)
+
+# -----------------------------
 # MJPEG frame generator
 # -----------------------------
 def generate_frames():
-    process_every_n_frames = 3   # run recognition every 3 frames
+    global violation_counter, alert_active
+
+    process_every_n_frames = 3
     frame_count = 0
 
     last_face_locations = []
@@ -64,12 +77,11 @@ def generate_frames():
 
         frame_count += 1
 
-        # -----------------------------
-        # Run recognition only sometimes
-        # -----------------------------
+        # ----------------------------------
+        # Run recognition periodically
+        # ----------------------------------
         if frame_count % process_every_n_frames == 0:
 
-            # Resize frame for faster processing
             small_frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
             rgb_small = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
 
@@ -94,16 +106,51 @@ def generate_frames():
                     name = known_names[index]
                     role = known_roles[index]
 
-                # Scale back face locations to original frame size
-                last_face_locations.append((
-                    top * 2, right * 2, bottom * 2, left * 2
-                ))
+                last_face_locations.append(
+                    (top * 2, right * 2, bottom * 2, left * 2)
+                )
                 last_face_names.append(name)
                 last_face_roles.append(role)
 
-        # -----------------------------
-        # Draw last known detections
-        # -----------------------------
+        # ----------------------------------
+        # SECURITY CONSTRAINT CHECK
+        # ----------------------------------
+        authorized_count = last_face_roles.count("authorized")
+        restricted_count = last_face_roles.count("restricted")
+        unknown_count = last_face_roles.count("unknown")
+
+        violation_reason = None
+
+        if restricted_count > 0:
+            violation_reason = "Restricted person detected"
+        elif unknown_count > 0:
+            violation_reason = "Unknown person detected"
+        elif authorized_count != 2:
+            violation_reason = f"Authorized count = {authorized_count} (expected 2)"
+
+        if violation_reason:
+            violation_counter += 1
+        else:
+            violation_counter = 0
+            alert_active = False
+
+        # ----------------------------------
+        # Trigger alert after debounce
+        # ----------------------------------
+        if violation_counter >= ALERT_DEBOUNCE_LIMIT and not alert_active:
+            alert_active = True
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            snapshot_path = os.path.join(
+                SNAPSHOT_DIR, f"alert_{timestamp}.jpg"
+            )
+            cv2.imwrite(snapshot_path, frame)
+
+            print(f"[ALERT] {violation_reason}")
+            print(f"[ALERT] Snapshot saved: {snapshot_path}")
+
+        # ----------------------------------
+        # Draw face boxes
+        # ----------------------------------
         for (top, right, bottom, left), name, role in zip(
             last_face_locations, last_face_names, last_face_roles
         ):
@@ -115,11 +162,9 @@ def generate_frames():
                 color = (0, 0, 255)
 
             cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
-
-            label = f"{name} ({role})"
             cv2.putText(
                 frame,
-                label,
+                f"{name} ({role})",
                 (left, top - 10),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.6,
@@ -127,9 +172,33 @@ def generate_frames():
                 2
             )
 
-        # -----------------------------
+        # ----------------------------------
+        # Draw system status
+        # ----------------------------------
+        if alert_active:
+            cv2.putText(
+                frame,
+                "SECURITY ALERT",
+                (20, 40),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (0, 0, 255),
+                3
+            )
+        else:
+            cv2.putText(
+                frame,
+                "STATUS: ACCESS OK",
+                (20, 40),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (0, 255, 0),
+                3
+            )
+
+        # ----------------------------------
         # Encode frame as JPEG
-        # -----------------------------
+        # ----------------------------------
         ret, buffer = cv2.imencode(".jpg", frame)
         frame_bytes = buffer.tobytes()
 
