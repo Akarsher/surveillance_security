@@ -1,16 +1,27 @@
 import cv2
 import os
+import csv
 import face_recognition
 from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
 from datetime import datetime
 
 app = FastAPI()
 
 # -----------------------------
-# Load known faces
+# Paths
 # -----------------------------
 KNOWN_FACES_DIR = "known_faces"
+SNAPSHOT_DIR = "snapshots"
+LOG_DIR = "logs"
+EVENT_LOG = os.path.join(LOG_DIR, "events.csv")
+
+os.makedirs(SNAPSHOT_DIR, exist_ok=True)
+os.makedirs(LOG_DIR, exist_ok=True)
+
+# -----------------------------
+# Load known faces
+# -----------------------------
 known_encodings = []
 known_names = []
 known_roles = []
@@ -26,39 +37,58 @@ def load_known_faces():
             image = face_recognition.load_image_file(path)
             encodings = face_recognition.face_encodings(image)
 
-            if len(encodings) == 0:
-                print(f"[WARNING] No face found in {path}")
-                continue
+            if encodings:
+                known_encodings.append(encodings[0])
+                known_names.append(os.path.splitext(file)[0])
+                known_roles.append(role)
 
-            known_encodings.append(encodings[0])
-            known_names.append(os.path.splitext(file)[0])
-            known_roles.append(role)
-
-    print("[INFO] Known faces loaded:")
-    for n, r in zip(known_names, known_roles):
-        print(f" - {n} ({r})")
+    print("[INFO] Known faces loaded")
 
 load_known_faces()
 
 # -----------------------------
-# Webcam setup (LOW LATENCY)
+# Webcam
 # -----------------------------
 camera = cv2.VideoCapture(0)
 camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 camera.set(cv2.CAP_PROP_FPS, 10)
 
 # -----------------------------
-# Alert configuration
+# Alert config
 # -----------------------------
 ALERT_DEBOUNCE_LIMIT = 3
 violation_counter = 0
 alert_active = False
 
-SNAPSHOT_DIR = "snapshots"
-os.makedirs(SNAPSHOT_DIR, exist_ok=True)
+# -----------------------------
+# CSV Logger
+# -----------------------------
+def log_event(reason, auth_count, rest_count, unk_count, snapshot):
+    file_exists = os.path.isfile(EVENT_LOG)
+
+    with open(EVENT_LOG, "a", newline="") as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow([
+                "Timestamp",
+                "Reason",
+                "Authorized",
+                "Restricted",
+                "Unknown",
+                "Snapshot"
+            ])
+
+        writer.writerow([
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            reason,
+            auth_count,
+            rest_count,
+            unk_count,
+            snapshot
+        ])
 
 # -----------------------------
-# MJPEG frame generator
+# MJPEG generator
 # -----------------------------
 def generate_frames():
     global violation_counter, alert_active
@@ -66,9 +96,7 @@ def generate_frames():
     process_every_n_frames = 3
     frame_count = 0
 
-    last_face_locations = []
-    last_face_names = []
-    last_face_roles = []
+    last_locs, last_names, last_roles = [], [], []
 
     while True:
         success, frame = camera.read()
@@ -77,135 +105,82 @@ def generate_frames():
 
         frame_count += 1
 
-        # ----------------------------------
-        # Run recognition periodically
-        # ----------------------------------
         if frame_count % process_every_n_frames == 0:
+            small = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
+            rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
 
-            small_frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
-            rgb_small = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
+            locs = face_recognition.face_locations(rgb)
+            encs = face_recognition.face_encodings(rgb, locs)
 
-            face_locations = face_recognition.face_locations(rgb_small)
-            face_encodings = face_recognition.face_encodings(rgb_small, face_locations)
+            last_locs, last_names, last_roles = [], [], []
 
-            last_face_locations = []
-            last_face_names = []
-            last_face_roles = []
-
-            for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
-
+            for (t, r, b, l), enc in zip(locs, encs):
                 matches = face_recognition.compare_faces(
-                    known_encodings, face_encoding, tolerance=0.6
+                    known_encodings, enc, tolerance=0.6
                 )
 
-                name = "Unknown"
-                role = "unknown"
-
+                name, role = "Unknown", "unknown"
                 if True in matches:
-                    index = matches.index(True)
-                    name = known_names[index]
-                    role = known_roles[index]
+                    idx = matches.index(True)
+                    name = known_names[idx]
+                    role = known_roles[idx]
 
-                last_face_locations.append(
-                    (top * 2, right * 2, bottom * 2, left * 2)
-                )
-                last_face_names.append(name)
-                last_face_roles.append(role)
+                last_locs.append((t*2, r*2, b*2, l*2))
+                last_names.append(name)
+                last_roles.append(role)
 
-        # ----------------------------------
-        # SECURITY CONSTRAINT CHECK
-        # ----------------------------------
-        authorized_count = last_face_roles.count("authorized")
-        restricted_count = last_face_roles.count("restricted")
-        unknown_count = last_face_roles.count("unknown")
+        # -----------------------------
+        # Constraint logic
+        # -----------------------------
+        a = last_roles.count("authorized")
+        r = last_roles.count("restricted")
+        u = last_roles.count("unknown")
 
-        violation_reason = None
+        reason = None
+        if r > 0:
+            reason = "Restricted person detected"
+        elif u > 0:
+            reason = "Unknown person detected"
+        elif a != 2:
+            reason = f"Authorized count = {a}"
 
-        if restricted_count > 0:
-            violation_reason = "Restricted person detected"
-        elif unknown_count > 0:
-            violation_reason = "Unknown person detected"
-        elif authorized_count != 2:
-            violation_reason = f"Authorized count = {authorized_count} (expected 2)"
-
-        if violation_reason:
+        if reason:
             violation_counter += 1
         else:
             violation_counter = 0
             alert_active = False
 
-        # ----------------------------------
-        # Trigger alert after debounce
-        # ----------------------------------
         if violation_counter >= ALERT_DEBOUNCE_LIMIT and not alert_active:
             alert_active = True
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            snapshot_path = os.path.join(
-                SNAPSHOT_DIR, f"alert_{timestamp}.jpg"
-            )
-            cv2.imwrite(snapshot_path, frame)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            snap = f"{SNAPSHOT_DIR}/alert_{ts}.jpg"
+            cv2.imwrite(snap, frame)
 
-            print(f"[ALERT] {violation_reason}")
-            print(f"[ALERT] Snapshot saved: {snapshot_path}")
+            log_event(reason, a, r, u, snap)
+            print("[ALERT]", reason)
 
-        # ----------------------------------
-        # Draw face boxes
-        # ----------------------------------
-        for (top, right, bottom, left), name, role in zip(
-            last_face_locations, last_face_names, last_face_roles
+        # -----------------------------
+        # Draw boxes
+        # -----------------------------
+        for (t, rgt, b, lft), name, role in zip(
+            last_locs, last_names, last_roles
         ):
-            if role == "authorized":
-                color = (0, 255, 0)
-            elif role == "restricted":
-                color = (0, 165, 255)
-            else:
-                color = (0, 0, 255)
+            color = (0,255,0) if role=="authorized" else (0,165,255) if role=="restricted" else (0,0,255)
+            cv2.rectangle(frame, (lft,t), (rgt,b), color, 2)
+            cv2.putText(frame, f"{name} ({role})", (lft, t-10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-            cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
-            cv2.putText(
-                frame,
-                f"{name} ({role})",
-                (left, top - 10),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                color,
-                2
-            )
+        # Status
+        status_text = "SECURITY ALERT" if alert_active else "ACCESS OK"
+        status_color = (0,0,255) if alert_active else (0,255,0)
+        cv2.putText(frame, status_text, (20,40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, status_color, 3)
 
-        # ----------------------------------
-        # Draw system status
-        # ----------------------------------
-        if alert_active:
-            cv2.putText(
-                frame,
-                "SECURITY ALERT",
-                (20, 40),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                (0, 0, 255),
-                3
-            )
-        else:
-            cv2.putText(
-                frame,
-                "STATUS: ACCESS OK",
-                (20, 40),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                (0, 255, 0),
-                3
-            )
-
-        # ----------------------------------
-        # Encode frame as JPEG
-        # ----------------------------------
-        ret, buffer = cv2.imencode(".jpg", frame)
-        frame_bytes = buffer.tobytes()
-
+        ret, buf = cv2.imencode(".jpg", frame)
         yield (
             b"--frame\r\n"
             b"Content-Type: image/jpeg\r\n\r\n" +
-            frame_bytes +
+            buf.tobytes() +
             b"\r\n"
         )
 
@@ -214,7 +189,7 @@ def generate_frames():
 # -----------------------------
 @app.get("/")
 def root():
-    return {"status": "Camera server running"}
+    return {"status": "running"}
 
 @app.get("/stream")
 def stream():
@@ -222,3 +197,45 @@ def stream():
         generate_frames(),
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
+
+@app.get("/events", response_class=HTMLResponse)
+def events_page():
+    rows = ""
+    if os.path.exists(EVENT_LOG):
+        with open(EVENT_LOG) as f:
+            reader = csv.reader(f)
+            next(reader)
+            for r in reader:
+                rows += f"""
+                <tr>
+                    <td>{r[0]}</td>
+                    <td>{r[1]}</td>
+                    <td>{r[2]}</td>
+                    <td>{r[3]}</td>
+                    <td>{r[4]}</td>
+                    <td><a href='/{r[5]}' target='_blank'>View</a></td>
+                </tr>
+                """
+
+    return f"""
+    <html>
+    <head>
+        <title>Security Events</title>
+        <style>
+            table {{ border-collapse: collapse; width: 100%; }}
+            th, td {{ border: 1px solid black; padding: 8px; text-align: center; }}
+            th {{ background-color: #333; color: white; }}
+        </style>
+    </head>
+    <body>
+        <h2>Security Event Log</h2>
+        <table>
+            <tr>
+                <th>Time</th><th>Reason</th>
+                <th>Auth</th><th>Restr</th><th>Unk</th><th>Snapshot</th>
+            </tr>
+            {rows}
+        </table>
+    </body>
+    </html>
+    """

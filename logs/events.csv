@@ -1,0 +1,9 @@
+Timestamp,Reason,Authorized,Restricted,Unknown,Snapshot
+2025-12-25 09:20:19,Authorized count = 0,0,0,0,snapshots/alert_20251225_092019.jpg
+2025-12-25 10:30:56,Authorized count = 1,1,0,0,snapshots/alert_20251225_103056.jpg
+2025-12-25 10:41:02,Authorized count = 1,1,0,0,snapshots/alert_20251225_104102.jpg
+2025-12-25 10:41:05,Authorized count = 1,1,0,0,snapshots/alert_20251225_104105.jpg
+2025-12-25 10:41:08,Authorized count = 1,1,0,0,snapshots/alert_20251225_104108.jpg
+2025-12-25 10:41:10,Authorized count = 1,1,0,0,snapshots/alert_20251225_104110.jpg
+2025-12-25 10:41:14,Authorized count = 1,1,0,0,snapshots/alert_20251225_104114.jpg
+2025-12-25 10:41:46,Authorized count = 1,1,0,0,snapshots/alert_20251225_104146.jpg
