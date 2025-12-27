@@ -7,8 +7,15 @@ from fastapi.responses import StreamingResponse, HTMLResponse
 from datetime import datetime
 import anyio
 from fastapi.staticfiles import StaticFiles
+from fastapi import Form, UploadFile, File, HTTPException
+from fastapi.responses import FileResponse
+import shutil
+
 
 app = FastAPI()
+
+ADMIN_PASSWORD = "admin123"   # change this before final demo
+
 
 # =============================
 # PATHS
@@ -290,3 +297,50 @@ def events_page():
     """
 
 app.mount("/snapshots", StaticFiles(directory=SNAPSHOT_DIR), name="snapshots")
+
+# =============================
+# ADMIN ROUTES  
+# =============================
+
+@app.get("/admin")
+def admin_page():
+    return FileResponse("admin.html")
+
+@app.post("/admin/add_person")
+async def add_person(
+    password: str = Form(...),
+    name: str = Form(...),
+    role: str = Form(...),
+    image: UploadFile = File(...)
+):
+    if password != ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Invalid admin password")
+
+    if role not in ["authorized", "restricted"]:
+        raise HTTPException(status_code=400, detail="Invalid role")
+
+    save_dir = os.path.join(KNOWN_FACES_DIR, role)
+    os.makedirs(save_dir, exist_ok=True)
+
+    img_path = os.path.join(save_dir, f"{name}.jpg")
+
+    with open(img_path, "wb") as buffer:
+        shutil.copyfileobj(image.file, buffer)
+
+    # Load and encode face
+    img = face_recognition.load_image_file(img_path)
+    enc = face_recognition.face_encodings(img)
+
+    if not enc:
+        os.remove(img_path)
+        raise HTTPException(status_code=400, detail="No face found in image")
+
+    # Update in-memory lists (LIVE UPDATE)
+    known_encodings.append(enc[0])
+    known_names.append(name)
+    known_roles.append(role)
+
+    return {
+        "status": "success",
+        "message": f"{name} added as {role}"
+    }
