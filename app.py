@@ -2,15 +2,17 @@ import cv2
 import os
 import csv
 import face_recognition
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, HTMLResponse
 from datetime import datetime
+import anyio
+from fastapi.staticfiles import StaticFiles
 
 app = FastAPI()
 
-# -----------------------------
-# Paths
-# -----------------------------
+# =============================
+# PATHS
+# =============================
 KNOWN_FACES_DIR = "known_faces"
 SNAPSHOT_DIR = "snapshots"
 LOG_DIR = "logs"
@@ -19,9 +21,29 @@ EVENT_LOG = os.path.join(LOG_DIR, "events.csv")
 os.makedirs(SNAPSHOT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 
-# -----------------------------
-# Load known faces
-# -----------------------------
+# =============================
+# WEBSOCKET MANAGER
+# =============================
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            await connection.send_json(message)
+
+manager = ConnectionManager()
+
+# =============================
+# LOAD KNOWN FACES
+# =============================
 known_encodings = []
 known_names = []
 known_roles = []
@@ -35,67 +57,51 @@ def load_known_faces():
         for file in os.listdir(role_dir):
             path = os.path.join(role_dir, file)
             image = face_recognition.load_image_file(path)
-            encodings = face_recognition.face_encodings(image)
-
-            if encodings:
-                known_encodings.append(encodings[0])
+            enc = face_recognition.face_encodings(image)
+            if enc:
+                known_encodings.append(enc[0])
                 known_names.append(os.path.splitext(file)[0])
                 known_roles.append(role)
 
-    print("[INFO] Known faces loaded")
-
 load_known_faces()
 
-# -----------------------------
-# Webcam
-# -----------------------------
+# =============================
+# CAMERA
+# =============================
 camera = cv2.VideoCapture(0)
 camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 camera.set(cv2.CAP_PROP_FPS, 10)
 
-# -----------------------------
-# Alert config
-# -----------------------------
+# =============================
+# ALERT CONFIG
+# =============================
 ALERT_DEBOUNCE_LIMIT = 3
 violation_counter = 0
 alert_active = False
+last_alert = None  # <-- cache last alert for new WS clients
 
-# -----------------------------
-# CSV Logger
-# -----------------------------
-def log_event(reason, auth_count, rest_count, unk_count, snapshot):
-    file_exists = os.path.isfile(EVENT_LOG)
-
+# =============================
+# CSV LOGGER
+# =============================
+def log_event(reason, a, r, u, snapshot):
+    exists = os.path.isfile(EVENT_LOG)
     with open(EVENT_LOG, "a", newline="") as f:
-        writer = csv.writer(f)
-        if not file_exists:
-            writer.writerow([
-                "Timestamp",
-                "Reason",
-                "Authorized",
-                "Restricted",
-                "Unknown",
-                "Snapshot"
-            ])
-
-        writer.writerow([
+        w = csv.writer(f)
+        if not exists:
+            w.writerow(["Time", "Reason", "Auth", "Restr", "Unk", "Snapshot"])
+        w.writerow([
             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            reason,
-            auth_count,
-            rest_count,
-            unk_count,
-            snapshot
+            reason, a, r, u, snapshot
         ])
 
-# -----------------------------
-# MJPEG generator
-# -----------------------------
+# =============================
+# MJPEG STREAM
+# =============================
 def generate_frames():
     global violation_counter, alert_active
 
     process_every_n_frames = 3
     frame_count = 0
-
     last_locs, last_names, last_roles = [], [], []
 
     while True:
@@ -114,24 +120,24 @@ def generate_frames():
 
             last_locs, last_names, last_roles = [], [], []
 
-            for (t, r, b, l), enc in zip(locs, encs):
+            for (t, rgt, b, lft), enc in zip(locs, encs):
                 matches = face_recognition.compare_faces(
                     known_encodings, enc, tolerance=0.6
                 )
 
                 name, role = "Unknown", "unknown"
                 if True in matches:
-                    idx = matches.index(True)
-                    name = known_names[idx]
-                    role = known_roles[idx]
+                    i = matches.index(True)
+                    name = known_names[i]
+                    role = known_roles[i]
 
-                last_locs.append((t*2, r*2, b*2, l*2))
+                last_locs.append((t*2, rgt*2, b*2, lft*2))
                 last_names.append(name)
                 last_roles.append(role)
 
-        # -----------------------------
-        # Constraint logic
-        # -----------------------------
+        # =============================
+        # CONSTRAINT CHECK
+        # =============================
         a = last_roles.count("authorized")
         r = last_roles.count("restricted")
         u = last_roles.count("unknown")
@@ -157,24 +163,39 @@ def generate_frames():
             cv2.imwrite(snap, frame)
 
             log_event(reason, a, r, u, snap)
+
+            msg = {
+                "time": ts,
+                "reason": reason,
+                "authorized": a,
+                "restricted": r,
+                "unknown": u,
+                "snapshot": snap
+            }
+            # cache last alert for new clients
+            global last_alert
+            last_alert = msg
+
+            # 🔴 PUSH REAL-TIME ALERT (safe from sync thread)
+            anyio.from_thread.run(manager.broadcast, msg)
+
             print("[ALERT]", reason)
 
-        # -----------------------------
-        # Draw boxes
-        # -----------------------------
+        # =============================
+        # DRAW UI
+        # =============================
         for (t, rgt, b, lft), name, role in zip(
             last_locs, last_names, last_roles
         ):
             color = (0,255,0) if role=="authorized" else (0,165,255) if role=="restricted" else (0,0,255)
             cv2.rectangle(frame, (lft,t), (rgt,b), color, 2)
-            cv2.putText(frame, f"{name} ({role})", (lft, t-10),
+            cv2.putText(frame, f"{name} ({role})", (lft,t-10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-        # Status
-        status_text = "SECURITY ALERT" if alert_active else "ACCESS OK"
-        status_color = (0,0,255) if alert_active else (0,255,0)
-        cv2.putText(frame, status_text, (20,40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, status_color, 3)
+        status = "SECURITY ALERT" if alert_active else "ACCESS OK"
+        s_color = (0,0,255) if alert_active else (0,255,0)
+        cv2.putText(frame, status, (20,40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, s_color, 3)
 
         ret, buf = cv2.imencode(".jpg", frame)
         yield (
@@ -184,9 +205,9 @@ def generate_frames():
             b"\r\n"
         )
 
-# -----------------------------
-# Routes
-# -----------------------------
+# =============================
+# ROUTES
+# =============================
 @app.get("/")
 def root():
     return {"status": "running"}
@@ -198,38 +219,66 @@ def stream():
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
 
+@app.websocket("/ws/alerts")
+async def websocket_alerts(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        # send the most recent alert immediately (if any)
+        if last_alert:
+            await websocket.send_json(last_alert)
+
+        # keep the connection alive; we ignore client pings
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
 @app.get("/events", response_class=HTMLResponse)
 def events_page():
     rows = ""
     if os.path.exists(EVENT_LOG):
         with open(EVENT_LOG) as f:
-            reader = csv.reader(f)
-            next(reader)
-            for r in reader:
+            r = csv.reader(f)
+            next(r)
+            for row in r:
                 rows += f"""
                 <tr>
-                    <td>{r[0]}</td>
-                    <td>{r[1]}</td>
-                    <td>{r[2]}</td>
-                    <td>{r[3]}</td>
-                    <td>{r[4]}</td>
-                    <td><a href='/{r[5]}' target='_blank'>View</a></td>
+                    <td>{row[0]}</td><td>{row[1]}</td>
+                    <td>{row[2]}</td><td>{row[3]}</td>
+                    <td>{row[4]}</td>
+                    <td><a href='/{row[5]}' target='_blank'>View</a></td>
                 </tr>
                 """
 
     return f"""
     <html>
     <head>
-        <title>Security Events</title>
-        <style>
-            table {{ border-collapse: collapse; width: 100%; }}
-            th, td {{ border: 1px solid black; padding: 8px; text-align: center; }}
-            th {{ background-color: #333; color: white; }}
-        </style>
+        <title>Security Dashboard</title>
+        <script>
+        const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+        const ws = new WebSocket(`${{scheme}}://${{location.host}}/ws/alerts`);
+        ws.onopen = () => {{
+            // keepalive ping so the server's receive loop stays satisfied
+            ws.send('hello');
+            setInterval(() => {{
+                if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+            }}, 30000);
+        }};
+        ws.onmessage = function(event) {{
+            const data = JSON.parse(event.data);
+            alert(
+                "🚨 SECURITY ALERT\\n" +
+                data.reason + "\\n" +
+                "Authorized: " + data.authorized
+            );
+        }};
+        ws.onclose = () => console.log('ws closed');
+        ws.onerror = (e) => console.error('ws error', e);
+        </script>
     </head>
     <body>
         <h2>Security Event Log</h2>
-        <table>
+        <table border="1" cellpadding="6">
             <tr>
                 <th>Time</th><th>Reason</th>
                 <th>Auth</th><th>Restr</th><th>Unk</th><th>Snapshot</th>
@@ -239,3 +288,5 @@ def events_page():
     </body>
     </html>
     """
+
+app.mount("/snapshots", StaticFiles(directory=SNAPSHOT_DIR), name="snapshots")
