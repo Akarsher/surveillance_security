@@ -3,19 +3,20 @@ import os
 import csv
 import face_recognition
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse, HTMLResponse
+from fastapi.responses import StreamingResponse, HTMLResponse, FileResponse, JSONResponse
 from datetime import datetime
 import anyio
 from fastapi.staticfiles import StaticFiles
-from fastapi import Form, UploadFile, File, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import Form, Body, UploadFile, File, HTTPException
 import shutil
 
 
 app = FastAPI()
 
-ADMIN_PASSWORD = "admin123"   # change this before final demo
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "admin123"
 
+admin_logged_in = False
 
 # =============================
 # PATHS
@@ -24,9 +25,11 @@ KNOWN_FACES_DIR = "known_faces"
 SNAPSHOT_DIR = "snapshots"
 LOG_DIR = "logs"
 EVENT_LOG = os.path.join(LOG_DIR, "events.csv")
+STATIC_DIR = "static"
 
 os.makedirs(SNAPSHOT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
+os.makedirs(STATIC_DIR, exist_ok=True)
 
 # =============================
 # WEBSOCKET MANAGER
@@ -297,14 +300,28 @@ def events_page():
     """
 
 app.mount("/snapshots", StaticFiles(directory=SNAPSHOT_DIR), name="snapshots")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # =============================
 # ADMIN ROUTES  
 # =============================
 
+@app.post("/admin/login")
+def admin_login(data: dict = Body(...)):
+    global admin_logged_in
+    if (
+        data.get("username") == ADMIN_USERNAME and
+        data.get("password") == ADMIN_PASSWORD
+    ):
+        admin_logged_in = True
+        return {"status": "success"}
+    return {"status": "fail"}
+
 @app.get("/admin")
 def admin_page():
-    return FileResponse("admin.html")
+    if not admin_logged_in:
+        return FileResponse("admin_login.html")
+    return FileResponse("admin_dashboard.html")
 
 @app.post("/admin/add_person")
 async def add_person(
@@ -313,6 +330,9 @@ async def add_person(
     role: str = Form(...),
     image: UploadFile = File(...)
 ):
+    if not admin_logged_in:
+        raise HTTPException(status_code=403, detail="Not logged in")
+
     if password != ADMIN_PASSWORD:
         raise HTTPException(status_code=401, detail="Invalid admin password")
 
@@ -344,3 +364,43 @@ async def add_person(
         "status": "success",
         "message": f"{name} added as {role}"
     }
+
+@app.get("/admin/persons")
+def get_persons():
+    if not admin_logged_in:
+        raise HTTPException(status_code=403)
+
+    data = []
+    for n, r in zip(known_names, known_roles):
+        data.append({"name": n, "role": r})
+    return data
+
+@app.get("/admin/events")
+def admin_events():
+    items = []
+    if os.path.exists(EVENT_LOG):
+        with open(EVENT_LOG, newline="") as f:
+            r = csv.reader(f)
+            header = next(r, None)
+            for row in r:
+                if len(row) < 6:
+                    continue
+                snap = row[5]
+                # normalize to snapshots/<file> so it works with /snapshots mount
+                if not snap.startswith("snapshots/"):
+                    # convert absolute or other paths to snapshots-relative if possible
+                    try:
+                        # keep only the filename and prepend snapshots/
+                        filename = os.path.basename(snap)
+                        snap = f"snapshots/{filename}"
+                    except Exception:
+                        pass
+                items.append({
+                    "time": row[0],
+                    "reason": row[1],
+                    "authorized": row[2],
+                    "restricted": row[3],
+                    "unknown": row[4],
+                    "snapshot": snap,
+                })
+    return JSONResponse(items)

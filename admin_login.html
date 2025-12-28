@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Admin Login</title>
+  <link rel="stylesheet" href="/static/admin_login.css">
+</head>
+<body>
+  <div class="login-card">
+    <h2>Admin Login</h2>
+
+    <label for="user">Username</label>
+    <input id="user" placeholder="Username">
+
+    <label for="pass">Password</label>
+    <input id="pass" type="password" placeholder="Password">
+
+    <button onclick="login()">Login</button>
+
+    <p id="msg"></p>
+  </div>
+
+<script>
+async function login() {
+  const res = await fetch("/admin/login", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      username: user.value,
+      password: pass.value
+    })
+  });
+
+  const data = await res.json();
+  if (data.status === "success") {
+    location.reload();
+  } else {
+    msg.innerText = "Invalid credentials";
+  }
+}
+</script>
+</body>
+</html>

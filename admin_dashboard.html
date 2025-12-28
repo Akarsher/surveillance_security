@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Admin Dashboard</title>
+  <link rel="stylesheet" href="/static/admin.css">
+  
+</head>
+<body>
+
+<h2>Add Person</h2>
+<form id="addForm">
+  <input name="name" placeholder="Name" required>
+  <select name="role">
+    <option value="authorized">Authorized</option>
+    <option value="restricted">Restricted</option>
+  </select>
+  <input type="file" name="image" required>
+  <button>Add</button>
+</form>
+<p id="addMsg"></p>
+
+<hr>
+
+<h2>Current Persons</h2>
+<table id="personsTable">
+  <tr><th>Name</th><th>Role</th></tr>
+</table>
+
+<hr>
+
+<h2>Event Logs</h2>
+<table id="eventsTable">
+  <tr>
+    <th>Time</th><th>Reason</th>
+    <th>Auth</th><th>Restr</th><th>Unk</th><th>Snapshot</th>
+  </tr>
+</table>
+
+<script>
+async function loadPersons() {
+  const res = await fetch("/admin/persons");
+  const data = await res.json();
+  const table = document.getElementById("personsTable");
+  table.innerHTML = "<tr><th>Name</th><th>Role</th></tr>";
+  data.forEach(p => {
+    table.innerHTML += `<tr><td>${p.name}</td><td>${p.role}</td></tr>`;
+  });
+}
+
+async function loadEvents() {
+  const res = await fetch("/admin/events");
+  const data = await res.json();
+  const table = document.getElementById("eventsTable");
+  table.innerHTML = `
+    <tr>
+      <th>Time</th><th>Reason</th>
+      <th>Auth</th><th>Restr</th><th>Unk</th><th>Snapshot</th>
+    </tr>`;
+  data.forEach(e => {
+    table.innerHTML += `
+      <tr>
+        <td>${e.time}</td>
+        <td>${e.reason}</td>
+        <td>${e.authorized}</td>
+        <td>${e.restricted}</td>
+        <td>${e.unknown}</td>
+        <td><a href="/${e.snapshot}" target="_blank">View</a></td>
+      </tr>`;
+  });
+}
+
+document.getElementById("addForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const formData = new FormData(e.target);
+  const res = await fetch("/admin/add_person", { method: "POST", body: formData });
+  const data = await res.json();
+  addMsg.innerText = data.message || "Added";
+  loadPersons();
+};
+
+loadPersons();
+loadEvents();
+</script>
+
+</body>
+</html>
