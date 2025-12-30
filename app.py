@@ -1,7 +1,6 @@
 import cv2
 import os
 import csv
-import face_recognition
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, HTMLResponse, FileResponse, JSONResponse
 from datetime import datetime
@@ -9,9 +8,17 @@ import anyio
 from fastapi.staticfiles import StaticFiles
 from fastapi import Form, Body, UploadFile, File, HTTPException
 import shutil
+import numpy as np
 
+os.environ.setdefault("INSIGHTFACE_HOME", os.path.join(os.getcwd(), ".insightface"))
+
+from insightface.app import FaceAnalysis
 
 app = FastAPI()
+
+# Init InsightFace
+face_app = FaceAnalysis(name="buffalo_s", root="C:/Users/akars/.insightface")  # Use buffalo_l instead of buffalo_m
+face_app.prepare(ctx_id=-1, det_size=(640, 640))  # CPU mode
 
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "admin123"
@@ -54,7 +61,7 @@ manager = ConnectionManager()
 # =============================
 # LOAD KNOWN FACES
 # =============================
-known_encodings = []
+known_encodings = []  # ArcFace embeddings (np.array, shape [512])
 known_names = []
 known_roles = []
 
@@ -63,15 +70,22 @@ def load_known_faces():
         role_dir = os.path.join(KNOWN_FACES_DIR, role)
         if not os.path.exists(role_dir):
             continue
-
         for file in os.listdir(role_dir):
             path = os.path.join(role_dir, file)
-            image = face_recognition.load_image_file(path)
-            enc = face_recognition.face_encodings(image)
-            if enc:
-                known_encodings.append(enc[0])
-                known_names.append(os.path.splitext(file)[0])
-                known_roles.append(role)
+            img = cv2.imread(path)
+            if img is None:
+                continue
+            faces = face_app.get(img)
+            if not faces:
+                continue
+            # Take the largest face
+            face = max(faces, key=lambda f: (f.bbox[2]-f.bbox[0])*(f.bbox[3]-f.bbox[1]))
+            emb = face.normed_embedding  # 512-d normalized vector
+            if emb is None:
+                continue
+            known_encodings.append(emb.astype(np.float32))
+            known_names.append(os.path.splitext(file)[0])
+            known_roles.append(role)
 
 load_known_faces()
 
@@ -109,8 +123,7 @@ def log_event(reason, a, r, u, snapshot):
 # =============================
 def generate_frames():
     global violation_counter, alert_active
-
-    process_every_n_frames = 3
+    process_every_n_frames = 6  # increase skipping
     frame_count = 0
     last_locs, last_names, last_roles = [], [], []
 
@@ -119,29 +132,31 @@ def generate_frames():
         if not success:
             break
 
+        # downscale for detection (0.5x); keep original for display/snapshot
+        small = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
+
         frame_count += 1
 
         if frame_count % process_every_n_frames == 0:
-            small = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
-            rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
-
-            locs = face_recognition.face_locations(rgb)
-            encs = face_recognition.face_encodings(rgb, locs)
-
             last_locs, last_names, last_roles = [], [], []
-
-            for (t, rgt, b, lft), enc in zip(locs, encs):
-                matches = face_recognition.compare_faces(
-                    known_encodings, enc, tolerance=0.6
-                )
-
+            faces = face_app.get(small)  # detect on smaller frame
+            for f in faces:
+                # map bbox back to original coordinates
+                x1, y1, x2, y2 = (f.bbox * 2).astype(int)
+                emb = f.normed_embedding
                 name, role = "Unknown", "unknown"
-                if True in matches:
-                    i = matches.index(True)
-                    name = known_names[i]
-                    role = known_roles[i]
 
-                last_locs.append((t*2, rgt*2, b*2, lft*2))
+                if emb is not None and len(known_encodings) > 0:
+                    sims = np.dot(np.stack(known_encodings), emb.astype(np.float32))
+                    i = int(np.argmax(sims))
+                    best = float(sims[i])
+
+                    # slightly stricter threshold on CPU to reduce false positives
+                    if best >= 0.45:
+                        name = known_names[i]
+                        role = known_roles[i]
+
+                last_locs.append((y1, x2, y2, x1))  # (top, right, bottom, left)
                 last_names.append(name)
                 last_roles.append(role)
 
@@ -341,29 +356,27 @@ async def add_person(
 
     save_dir = os.path.join(KNOWN_FACES_DIR, role)
     os.makedirs(save_dir, exist_ok=True)
-
     img_path = os.path.join(save_dir, f"{name}.jpg")
-
     with open(img_path, "wb") as buffer:
         shutil.copyfileobj(image.file, buffer)
 
-    # Load and encode face
-    img = face_recognition.load_image_file(img_path)
-    enc = face_recognition.face_encodings(img)
-
-    if not enc:
+    img = cv2.imread(img_path)
+    faces = face_app.get(img)
+    if not faces:
         os.remove(img_path)
         raise HTTPException(status_code=400, detail="No face found in image")
 
-    # Update in-memory lists (LIVE UPDATE)
-    known_encodings.append(enc[0])
+    face = max(faces, key=lambda f: (f.bbox[2]-f.bbox[0])*(f.bbox[3]-f.bbox[1]))
+    emb = face.normed_embedding
+    if emb is None:
+        os.remove(img_path)
+        raise HTTPException(status_code=400, detail="Failed to compute embedding")
+
+    known_encodings.append(emb.astype(np.float32))
     known_names.append(name)
     known_roles.append(role)
 
-    return {
-        "status": "success",
-        "message": f"{name} added as {role}"
-    }
+    return {"status": "success", "message": f"{name} added as {role}"}
 
 @app.get("/admin/persons")
 def get_persons():

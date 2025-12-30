@@ -15,3 +15,23 @@ Timestamp,Reason,Authorized,Restricted,Unknown,Snapshot
 2025-12-26 23:24:52,Authorized count = 1,1,0,0,snapshots/alert_20251226_232452.jpg
 2025-12-27 11:55:39,Authorized count = 0,0,0,0,snapshots/alert_20251227_115539.jpg
 2025-12-27 11:59:27,Authorized count = 1,1,0,0,snapshots/alert_20251227_115927.jpg
+2025-12-29 08:31:50,Authorized count = 0,0,0,0,snapshots/alert_20251229_083150.jpg
+2025-12-29 08:32:16,Authorized count = 0,0,0,0,snapshots/alert_20251229_083216.jpg
+2025-12-29 08:32:22,Authorized count = 1,1,0,0,snapshots/alert_20251229_083222.jpg
+2025-12-29 08:32:39,Unknown person detected,0,0,1,snapshots/alert_20251229_083239.jpg
+2025-12-29 08:33:04,Authorized count = 1,1,0,0,snapshots/alert_20251229_083304.jpg
+2025-12-29 08:33:10,Authorized count = 1,1,0,0,snapshots/alert_20251229_083310.jpg
+2025-12-29 08:33:15,Authorized count = 1,1,0,0,snapshots/alert_20251229_083315.jpg
+2025-12-29 08:33:36,Authorized count = 1,1,0,0,snapshots/alert_20251229_083336.jpg
+2025-12-29 08:33:55,Authorized count = 1,1,0,0,snapshots/alert_20251229_083355.jpg
+2025-12-29 08:34:00,Authorized count = 1,1,0,0,snapshots/alert_20251229_083400.jpg
+2025-12-29 08:38:41,Authorized count = 1,1,0,0,snapshots/alert_20251229_083841.jpg
+2025-12-29 08:48:26,Authorized count = 1,1,0,0,snapshots/alert_20251229_084826.jpg
+2025-12-29 09:00:34,Unknown person detected,1,0,1,snapshots/alert_20251229_090034.jpg
+2025-12-29 10:06:38,Unknown person detected,1,0,1,snapshots/alert_20251229_100638.jpg
+2025-12-29 10:08:53,Authorized count = 1,1,0,0,snapshots/alert_20251229_100853.jpg
+2025-12-29 10:12:29,Authorized count = 1,1,0,0,snapshots/alert_20251229_101229.jpg
+2025-12-29 10:13:16,Unknown person detected,1,0,1,snapshots/alert_20251229_101316.jpg
+2025-12-29 10:13:34,Authorized count = 1,1,0,0,snapshots/alert_20251229_101334.jpg
+2025-12-30 08:55:58,Authorized count = 0,0,0,0,snapshots/alert_20251230_085558.jpg
+2025-12-30 09:02:23,Authorized count = 0,0,0,0,snapshots/alert_20251230_090223.jpg
