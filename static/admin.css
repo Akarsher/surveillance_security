@@ -93,6 +93,16 @@ button:active, .btn:active { transform: translateY(1px); }
   font-weight: 600;
 }
 
+.alert-banner {
+  margin: 10px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid #ef4444;
+  background: rgba(239, 68, 68, 0.12);
+  color: #fecaca;
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.25);
+}
+
 /* Table styling */
 table {
   width: 100%;

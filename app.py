@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi import Form, Body, UploadFile, File, HTTPException
 import shutil
 import numpy as np
+from typing import Optional
 
 os.environ.setdefault("INSIGHTFACE_HOME", os.path.join(os.getcwd(), ".insightface"))
 
@@ -248,11 +249,8 @@ def stream():
 async def websocket_alerts(websocket: WebSocket):
     await manager.connect(websocket)
     try:
-        # send the most recent alert immediately (if any)
         if last_alert:
-            await websocket.send_json(last_alert)
-
-        # keep the connection alive; we ignore client pings
+            await websocket.send_json(last_alert)  # send most recent on connect
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
@@ -377,6 +375,73 @@ async def add_person(
     known_roles.append(role)
 
     return {"status": "success", "message": f"{name} added as {role}"}
+
+@app.get("/admin/persons")
+def admin_persons():
+    # return current persons (name, role)
+    items = [{"name": n, "role": r} for n, r in zip(known_names, known_roles)]
+    return JSONResponse(items)
+
+@app.post("/admin/delete_person")
+async def delete_person(name: str = Form(...)):
+    # find indices for this name
+    indices = [i for i, n in enumerate(known_names) if n == name]
+    if not indices:
+        raise HTTPException(status_code=404, detail="Person not found")
+    # remove files from both authorized/restricted if present
+    removed_any = False
+    for role in ["authorized", "restricted"]:
+        path = os.path.join(KNOWN_FACES_DIR, role, f"{name}.jpg")
+        if os.path.exists(path):
+            os.remove(path)
+            removed_any = True
+    # remove from in-memory lists (reverse sort to pop safely)
+    for i in sorted(indices, reverse=True):
+        known_names.pop(i)
+        known_roles.pop(i)
+        known_encodings.pop(i)
+    return {"status": "success", "message": f"Deleted {name}", "removed_file": removed_any}
+
+@app.post("/admin/update_image")
+async def update_image(
+    name: str = Form(...),
+    role: str = Form(...),
+    image: UploadFile = File(...)
+):
+    if role not in ["authorized", "restricted"]:
+        raise HTTPException(status_code=400, detail="Invalid role")
+
+    # save new image
+    save_dir = os.path.join(KNOWN_FACES_DIR, role)
+    os.makedirs(save_dir, exist_ok=True)
+    img_path = os.path.join(save_dir, f"{name}.jpg")
+    with open(img_path, "wb") as buffer:
+        shutil.copyfileobj(image.file, buffer)
+
+    # compute new embedding
+    img = cv2.imread(img_path)
+    faces = face_app.get(img)
+    if not faces:
+        raise HTTPException(status_code=400, detail="No face found in image")
+    face = max(faces, key=lambda f: (f.bbox[2]-f.bbox[0])*(f.bbox[3]-f.bbox[1]))
+    emb = face.normed_embedding
+    if emb is None:
+        raise HTTPException(status_code=400, detail="Failed to compute embedding")
+
+    # update in-memory entry: replace or add
+    replaced = False
+    for i, (n, r) in enumerate(zip(known_names, known_roles)):
+        if n == name:
+            known_encodings[i] = emb.astype(np.float32)
+            known_roles[i] = role
+            replaced = True
+            break
+    if not replaced:
+        known_names.append(name)
+        known_roles.append(role)
+        known_encodings.append(emb.astype(np.float32))
+
+    return {"status": "success", "message": f"Updated image for {name}"}
 
 @app.get("/admin/persons")
 def get_persons():

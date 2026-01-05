@@ -21,14 +21,25 @@
 
 <hr>
 
-<h2>Current Persons</h2>
+<div style="display:flex; justify-content: space-between; align-items: center;">
+  <h2>Current Persons</h2>
+  <button class="btn" onclick="openStream()">Live Stream</button>
+</div>
 <table id="personsTable">
-  <tr><th>Name</th><th>Role</th></tr>
+  <tr>
+    <th>Name</th><th>Role</th><th>Actions</th>
+  </tr>
 </table>
 
 <hr>
 
 <h2>Event Logs</h2>
+
+<!-- Live alert banner -->
+<div id="alertBanner" class="alert-banner" style="display:none;">
+  <strong>SECURITY ALERT:</strong> <span id="alertText"></span>
+</div>
+
 <table id="eventsTable">
   <tr>
     <th>Time</th><th>Reason</th>
@@ -37,14 +48,54 @@
 </table>
 
 <script>
+// Load persons with actions
 async function loadPersons() {
   const res = await fetch("/admin/persons");
-  const data = await res.json();
+  const persons = await res.json();
   const table = document.getElementById("personsTable");
-  table.innerHTML = "<tr><th>Name</th><th>Role</th></tr>";
-  data.forEach(p => {
-    table.innerHTML += `<tr><td>${p.name}</td><td>${p.role}</td></tr>`;
+  table.innerHTML = `
+    <tr>
+      <th>Name</th><th>Role</th><th>Actions</th>
+    </tr>`;
+  persons.forEach(p => {
+    table.innerHTML += `
+      <tr>
+        <td>${p.name}</td>
+        <td>${p.role}</td>
+        <td style="display:flex; gap:8px; align-items:center;">
+          <button class="btn" onclick="deletePerson('${p.name}')">Delete</button>
+          <label class="btn" style="position:relative;">
+            Change Image
+            <input type="file" accept="image/*" style="position:absolute; inset:0; opacity:0;" onchange="updateImage('${p.name}', '${p.role}', this.files[0])">
+          </label>
+        </td>
+      </tr>`;
   });
+}
+
+async function deletePerson(name) {
+  const form = new FormData();
+  form.append("name", name);
+  const res = await fetch("/admin/delete_person", { method: "POST", body: form });
+  const data = await res.json();
+  alert(data.message || "Deleted");
+  loadPersons();
+}
+
+async function updateImage(name, role, file) {
+  if (!file) return;
+  const form = new FormData();
+  form.append("name", name);
+  form.append("role", role);
+  form.append("image", file);
+  const res = await fetch("/admin/update_image", { method: "POST", body: form });
+  const data = await res.json();
+  alert(data.message || "Updated");
+  loadPersons();
+}
+
+function openStream() {
+  window.open("/stream", "_blank");
 }
 
 async function loadEvents() {
@@ -77,6 +128,39 @@ document.getElementById("addForm").onsubmit = async (e) => {
   addMsg.innerText = data.message || "Added";
   loadPersons();
 };
+
+// WebSocket alerts (same as /events page, with banner update)
+(function setupAlertsWS() {
+  const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${scheme}://${location.host}/ws/alerts`);
+  const banner = document.getElementById('alertBanner');
+  const text = document.getElementById('alertText');
+
+  ws.onopen = () => {
+    ws.send('hello');
+    setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+    }, 30000);
+  };
+
+  ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    // Popup
+    alert(
+      "🚨 SECURITY ALERT\n" +
+      data.reason + "\n" +
+      "Authorized: " + data.authorized + ", " +
+      "Restricted: " + data.restricted + ", " +
+      "Unknown: " + data.unknown
+    );
+    // Banner
+    text.textContent = `${data.reason} — Auth:${data.authorized} Restr:${data.restricted} Unk:${data.unknown}`;
+    banner.style.display = 'block';
+  };
+
+  ws.onclose = () => console.log('ws closed');
+  ws.onerror = (e) => console.error('ws error', e);
+})();
 
 loadPersons();
 loadEvents();

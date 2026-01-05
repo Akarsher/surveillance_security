@@ -35,3 +35,5 @@ Timestamp,Reason,Authorized,Restricted,Unknown,Snapshot
 2025-12-29 10:13:34,Authorized count = 1,1,0,0,snapshots/alert_20251229_101334.jpg
 2025-12-30 08:55:58,Authorized count = 0,0,0,0,snapshots/alert_20251230_085558.jpg
 2025-12-30 09:02:23,Authorized count = 0,0,0,0,snapshots/alert_20251230_090223.jpg
+2026-01-04 13:34:10,Authorized count = 0,0,0,0,snapshots/alert_20260104_133410.jpg
+2026-01-04 13:44:39,Authorized count = 0,0,0,0,snapshots/alert_20260104_134439.jpg
