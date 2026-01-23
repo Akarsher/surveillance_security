@@ -21,8 +21,8 @@ from insightface.app import FaceAnalysis
 
 app = FastAPI()
 
-# Init InsightFace
-face_app = FaceAnalysis(name="buffalo_s", root="C:/Users/akars/.insightface")  # Use buffalo_l instead of buffalo_m
+# Init InsightFace (use env var for portability)
+face_app = FaceAnalysis(name="buffalo_s", root=os.environ["INSIGHTFACE_HOME"])
 face_app.prepare(ctx_id=-1, det_size=(640, 640))  # CPU mode
 
 ADMIN_USERNAME = "admin"
@@ -92,7 +92,8 @@ def rebuild_cache():
 def cleanup_old_events():
     cutoff = datetime.utcnow() - timedelta(days=2)
     with SessionLocal() as s:
-        s.execute(delete(Event).where(Event.created_at < cutoff))
+        # prune events older than 2 days based on Event.time
+        s.execute(delete(Event).where(Event.time < cutoff))
         s.commit()
 
 def load_known_faces_into_db_once():
@@ -142,6 +143,13 @@ def on_startup():
     t = threading.Thread(target=loop_cleanup, daemon=True)
     t.start()
 
+@app.on_event("shutdown")
+def on_shutdown():
+    try:
+        camera.release()
+    except Exception:
+        pass
+
 # =============================
 # CAMERA
 # =============================
@@ -170,120 +178,102 @@ def log_event(reason, a, r, u, snapshot):
             reason=reason, authorized=a, restricted=r, unknown=u,
             snapshot_path=snap
         ))
-        # prune > 2 days
+        # prune > 2 days using Event.time
         cutoff = datetime.utcnow() - timedelta(days=2)
-        s.execute(delete(Event).where(Event.created_at < cutoff))
+        s.execute(delete(Event).where(Event.time < cutoff))
         s.commit()
 
 # =============================
 # MJPEG STREAM
 # =============================
 def generate_frames():
-    global violation_counter, alert_active
-    process_every_n_frames = 6  # increase skipping
+    global violation_counter, alert_active, last_alert
+    process_every_n_frames = 5
     frame_count = 0
     last_locs, last_names, last_roles = [], [], []
+    reason = ""
+    a = r = u = 0
 
     while True:
         success, frame = camera.read()
         if not success:
             break
 
-        # downscale for detection (0.5x); keep original for display/snapshot
-        small = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
-
         frame_count += 1
 
         if frame_count % process_every_n_frames == 0:
+            # detect + recognize (populate last_names/last_roles)
             last_locs, last_names, last_roles = [], [], []
-            faces = face_app.get(small)  # detect on smaller frame
+            small = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
+            faces = face_app.get(small)
+
             for f in faces:
-                # map bbox back to original coordinates
                 x1, y1, x2, y2 = (f.bbox * 2).astype(int)
                 emb = f.normed_embedding
                 name, role = "Unknown", "unknown"
 
                 if emb is not None and enc_mat is not None:
                     sims = enc_mat @ emb.astype(np.float32)
-                    i = int(np.argmax(sims))
-                    best = float(sims[i])
+                    i = int(np.argmax(sims)); best = float(sims[i])
                     if best >= 0.45:
                         name = known_names[i]
                         role = known_roles[i]
 
-                last_locs.append((y1, x2, y2, x1))  # (top, right, bottom, left)
+                last_locs.append((y1, x2, y2, x1))
                 last_names.append(name)
                 last_roles.append(role)
 
-        # =============================
-        # CONSTRAINT CHECK
-        # =============================
-        a = last_roles.count("authorized")
-        r = last_roles.count("restricted")
-        u = last_roles.count("unknown")
+            # recompute counts every processed frame
+            a = sum(1 for rr in last_roles if rr == "authorized")
+            r = sum(1 for rr in last_roles if rr == "restricted")
+            u = sum(1 for rr in last_roles if rr not in ("authorized", "restricted"))
 
-        reason = None
-        if r > 0:
-            reason = "Restricted person detected"
-        elif u > 0:
-            reason = "Unknown person detected"
-        elif a != 2:
-            reason = f"Authorized count = {a}"
+            # set reason based on constraints
+            if r > 0:
+                reason = "Restricted person detected"
+            elif u > 0:
+                reason = "Unknown person detected"
+            elif a != 2:
+                reason = f"Authorized count = {a}"
+            else:
+                reason = ""
 
-        if reason:
-            violation_counter += 1
-        else:
-            violation_counter = 0
-            alert_active = False
+            # update debounce/alerts continuously
+            if reason:
+                violation_counter += 1
+            else:
+                violation_counter = 0
+                alert_active = False  # clear alert when scene is normal
 
-        if violation_counter >= ALERT_DEBOUNCE_LIMIT and not alert_active:
-            alert_active = True
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            snap = f"{SNAPSHOT_DIR}/alert_{ts}.jpg"
-            cv2.imwrite(snap, frame)
+            if violation_counter >= ALERT_DEBOUNCE_LIMIT and not alert_active:
+                alert_active = True
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                snap_path = os.path.join(SNAPSHOT_DIR, f"alert_{ts}.jpg")
+                cv2.imwrite(snap_path, frame)
 
-            log_event(reason, a, r, u, snap)
+                log_event(reason, a, r, u, snap_path)
 
-            msg = {
-                "time": ts,
-                "reason": reason,
-                "authorized": a,
-                "restricted": r,
-                "unknown": u,
-                "snapshot": snap
-            }
-            # cache last alert for new clients
-            global last_alert
-            last_alert = msg
+                msg = {
+                    "time": ts,
+                    "reason": reason,
+                    "authorized": a,
+                    "restricted": r,
+                    "unknown": u,
+                    "snapshot": f"snapshots/{os.path.basename(snap_path)}"
+                }
+                last_alert = msg
+                anyio.from_thread.run(manager.broadcast, msg)
+                print("[ALERT]", reason)
 
-            # 🔴 PUSH REAL-TIME ALERT (safe from sync thread)
-            anyio.from_thread.run(manager.broadcast, msg)
+        # draw overlays (uses latest last_*)
+        for (t, rg, b, l), name, role in zip(last_locs, last_names, last_roles):
+            color = (0,255,0) if role == "authorized" else (0,165,255) if role == "restricted" else (0,0,255)
+            cv2.rectangle(frame, (l, t), (rg, b), color, 1)
+            cv2.putText(frame, name, (l, max(0, t - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
-            print("[ALERT]", reason)
-
-        # =============================
-        # DRAW UI
-        # =============================
-        for (t, rgt, b, lft), name, role in zip(
-            last_locs, last_names, last_roles
-        ):
-            color = (0,255,0) if role=="authorized" else (0,165,255) if role=="restricted" else (0,0,255)
-            cv2.rectangle(frame, (lft,t), (rgt,b), color, 2)
-            cv2.putText(frame, f"{name} ({role})", (lft,t-10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-
-        status = "SECURITY ALERT" if alert_active else "ACCESS OK"
-        s_color = (0,0,255) if alert_active else (0,255,0)
-        cv2.putText(frame, status, (20,40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, s_color, 3)
-
-        ret, buf = cv2.imencode(".jpg", frame)
-        yield (
-            b"--frame\r\n"
-            b"Content-Type: image/jpeg\r\n\r\n" +
-            buf.tobytes() +
-            b"\r\n"
-        )
+        # yield MJPEG chunk
+        ret, buffer = cv2.imencode('.jpg', frame)
+        yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + bytearray(buffer) + b"\r\n"
 
 # =============================
 # ROUTES
@@ -427,11 +417,11 @@ async def add_person(
     return {"status": "success", "message": f"{name} added as {role}"}
 
 @app.get("/admin/persons")
-def admin_persons():
-    with SessionLocal() as s:
-        people = s.scalars(select(Person)).all()
-        items = [{"name": p.name, "role": p.role} for p in people]
-    return JSONResponse(items)
+def get_persons():
+    if not admin_logged_in:
+        raise HTTPException(status_code=403)
+    data = [{"name": n, "role": r} for n, r in zip(known_names, known_roles)]
+    return data
 
 @app.post("/admin/delete_person")
 async def delete_person(name: str = Form(...)):
@@ -489,29 +479,3 @@ async def update_image(
 
     rebuild_cache()
     return {"status": "success", "message": f"Updated image for {name}"}
-
-@app.get("/admin/persons")
-def get_persons():
-    if not admin_logged_in:
-        raise HTTPException(status_code=403)
-
-    data = []
-    for n, r in zip(known_names, known_roles):
-        data.append({"name": n, "role": r})
-    return data
-
-@app.get("/admin/events")
-def admin_events():
-    items = []
-    with SessionLocal() as s:
-        events = s.scalars(select(Event).order_by(Event.time.desc())).all()
-        for e in events:
-            items.append({
-                "time": e.time.strftime("%Y-%m-%d %H:%M:%S"),
-                "reason": e.reason,
-                "authorized": e.authorized,
-                "restricted": e.restricted,
-                "unknown": e.unknown,
-                "snapshot": e.snapshot_path or ""
-            })
-    return JSONResponse(items)
