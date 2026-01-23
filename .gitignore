@@ -5,6 +5,10 @@ __pycache__/
 # Virtual environment
 venv/
 
+# packages
+insightface/
+.insightface/
+
 # Environment variables
 .env
 

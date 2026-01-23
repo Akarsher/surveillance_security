@@ -21,8 +21,8 @@ from insightface.app import FaceAnalysis
 
 app = FastAPI()
 
-# Init InsightFace
-face_app = FaceAnalysis(name="buffalo_s", root="C:/Users/akars/.insightface") 
+# Init InsightFace (use env var for portability)
+face_app = FaceAnalysis(name="buffalo_s", root=os.environ["INSIGHTFACE_HOME"])
 face_app.prepare(ctx_id=-1, det_size=(640, 640))  # CPU mode
 
 ADMIN_USERNAME = "admin"
@@ -92,7 +92,8 @@ def rebuild_cache():
 def cleanup_old_events():
     cutoff = datetime.utcnow() - timedelta(days=2)
     with SessionLocal() as s:
-        s.execute(delete(Event).where(Event.created_at < cutoff))
+        # prune events older than 2 days based on Event.time
+        s.execute(delete(Event).where(Event.time < cutoff))
         s.commit()
 
 def load_known_faces_into_db_once():
@@ -142,6 +143,13 @@ def on_startup():
     t = threading.Thread(target=loop_cleanup, daemon=True)
     t.start()
 
+@app.on_event("shutdown")
+def on_shutdown():
+    try:
+        camera.release()
+    except Exception:
+        pass
+
 # =============================
 # CAMERA
 # =============================
@@ -170,9 +178,9 @@ def log_event(reason, a, r, u, snapshot):
             reason=reason, authorized=a, restricted=r, unknown=u,
             snapshot_path=snap
         ))
-        # prune > 2 days
+        # prune > 2 days using Event.time
         cutoff = datetime.utcnow() - timedelta(days=2)
-        s.execute(delete(Event).where(Event.created_at < cutoff))
+        s.execute(delete(Event).where(Event.time < cutoff))
         s.commit()
 
 # =============================
@@ -409,11 +417,11 @@ async def add_person(
     return {"status": "success", "message": f"{name} added as {role}"}
 
 @app.get("/admin/persons")
-def admin_persons():
-    with SessionLocal() as s:
-        people = s.scalars(select(Person)).all()
-        items = [{"name": p.name, "role": p.role} for p in people]
-    return JSONResponse(items)
+def get_persons():
+    if not admin_logged_in:
+        raise HTTPException(status_code=403)
+    data = [{"name": n, "role": r} for n, r in zip(known_names, known_roles)]
+    return data
 
 @app.post("/admin/delete_person")
 async def delete_person(name: str = Form(...)):
@@ -471,29 +479,3 @@ async def update_image(
 
     rebuild_cache()
     return {"status": "success", "message": f"Updated image for {name}"}
-
-@app.get("/admin/persons")
-def get_persons():
-    if not admin_logged_in:
-        raise HTTPException(status_code=403)
-
-    data = []
-    for n, r in zip(known_names, known_roles):
-        data.append({"name": n, "role": r})
-    return data
-
-@app.get("/admin/events")
-def admin_events():
-    items = []
-    with SessionLocal() as s:
-        events = s.scalars(select(Event).order_by(Event.time.desc())).all()
-        for e in events:
-            items.append({
-                "time": e.time.strftime("%Y-%m-%d %H:%M:%S"),
-                "reason": e.reason,
-                "authorized": e.authorized,
-                "restricted": e.restricted,
-                "unknown": e.unknown,
-                "snapshot": e.snapshot_path or ""
-            })
-    return JSONResponse(items)
