@@ -193,6 +193,7 @@ def generate_frames():
     last_locs, last_names, last_roles = [], [], []
     reason = ""
     a = r = u = 0
+    last_reason = None  # track last fired reason
 
     while True:
         success, frame = camera.read()
@@ -228,7 +229,7 @@ def generate_frames():
             r = sum(1 for rr in last_roles if rr == "restricted")
             u = sum(1 for rr in last_roles if rr not in ("authorized", "restricted"))
 
-            # set reason based on constraints
+            # prioritize violations: restricted > unknown > authorized count
             if r > 0:
                 reason = "Restricted person detected"
             elif u > 0:
@@ -238,15 +239,20 @@ def generate_frames():
             else:
                 reason = ""
 
-            # update debounce/alerts continuously
+            # update debounce
             if reason:
                 violation_counter += 1
             else:
                 violation_counter = 0
-                alert_active = False  # clear alert when scene is normal
+                alert_active = False
+                last_reason = None
 
-            if violation_counter >= ALERT_DEBOUNCE_LIMIT and not alert_active:
+            # fire alert when:
+            # - debounce reached AND
+            # - either no active alert OR the violation type changed
+            if violation_counter >= ALERT_DEBOUNCE_LIMIT and (not alert_active or reason != last_reason):
                 alert_active = True
+                last_reason = reason
                 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
                 snap_path = os.path.join(SNAPSHOT_DIR, f"alert_{ts}.jpg")
                 cv2.imwrite(snap_path, frame)
