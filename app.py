@@ -11,7 +11,7 @@ import shutil
 import numpy as np
 from typing import Optional
 import threading
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, update
 from sqlalchemy.exc import IntegrityError
 from db import SessionLocal, init_db, Person, Event
 
@@ -426,8 +426,79 @@ async def add_person(
 def get_persons():
     if not admin_logged_in:
         raise HTTPException(status_code=403)
-    data = [{"name": n, "role": r} for n, r in zip(known_names, known_roles)]
-    return data
+    with SessionLocal() as s:
+        people = s.scalars(select(Person)).all()
+        return [{"id": p.id, "name": p.name, "role": p.role, "image_path": p.image_path} for p in people]
+
+@app.post("/admin/edit_person")
+async def edit_person(
+    id: int = Form(...),
+    name: str = Form(...),
+    role: str = Form(...)
+):
+    if not admin_logged_in:
+        raise HTTPException(status_code=403)
+    if role not in ["authorized", "restricted"]:
+        raise HTTPException(status_code=400, detail="Invalid role")
+    with SessionLocal() as s:
+        p = s.get(Person, id)
+        if not p:
+            raise HTTPException(status_code=404, detail="Person not found")
+        # rename file if name changed (optional)
+        if name != p.name:
+            new_path = os.path.join(KNOWN_FACES_DIR, role, f"{name}.jpg")
+            os.makedirs(os.path.dirname(new_path), exist_ok=True)
+            try:
+                if os.path.exists(p.image_path):
+                    os.replace(p.image_path, new_path)
+                p.image_path = new_path
+            except Exception:
+                # keep old path if move fails
+                pass
+        p.name = name
+        p.role = role
+        s.commit()
+    rebuild_cache()
+    return {"status": "success", "message": "Person updated"}
+
+@app.post("/admin/update_image_by_id")
+async def update_image_by_id(
+    id: int = Form(...),
+    role: str = Form(...),
+    image: UploadFile = File(...)
+):
+    if not admin_logged_in:
+        raise HTTPException(status_code=403)
+    if role not in ["authorized", "restricted"]:
+        raise HTTPException(status_code=400, detail="Invalid role")
+
+    with SessionLocal() as s:
+        p = s.get(Person, id)
+        if not p:
+            raise HTTPException(status_code=404, detail="Person not found")
+
+        save_dir = os.path.join(KNOWN_FACES_DIR, role)
+        os.makedirs(save_dir, exist_ok=True)
+        img_path = os.path.join(save_dir, f"{p.name}.jpg")
+        with open(img_path, "wb") as buffer:
+            shutil.copyfileobj(image.file, buffer)
+
+        img = cv2.imread(img_path)
+        faces = face_app.get(img)
+        if not faces:
+            raise HTTPException(status_code=400, detail="No face found in image")
+        face = max(faces, key=lambda f: (f.bbox[2]-f.bbox[0])*(f.bbox[3]-f.bbox[1]))
+        emb = face.normed_embedding
+        if emb is None:
+            raise HTTPException(status_code=400, detail="Failed to compute embedding")
+
+        p.role = role
+        p.image_path = img_path
+        p.embedding = np_to_blob(emb)
+        s.commit()
+
+    rebuild_cache()
+    return {"status": "success", "message": "Image updated"}
 
 @app.post("/admin/delete_person")
 async def delete_person(name: str = Form(...)):
@@ -447,41 +518,20 @@ async def delete_person(name: str = Form(...)):
     rebuild_cache()
     return {"status": "success", "message": f"Deleted {name}"}
 
-@app.post("/admin/update_image")
-async def update_image(
-    name: str = Form(...),
-    role: str = Form(...),
-    image: UploadFile = File(...)
-):
-    if role not in ["authorized", "restricted"]:
-        raise HTTPException(status_code=400, detail="Invalid role")
-
-    save_dir = os.path.join(KNOWN_FACES_DIR, role)
-    os.makedirs(save_dir, exist_ok=True)
-    img_path = os.path.join(save_dir, f"{name}.jpg")
-    with open(img_path, "wb") as buffer:
-        shutil.copyfileobj(image.file, buffer)
-
-    img = cv2.imread(img_path)
-    faces = face_app.get(img)
-    if not faces:
-        raise HTTPException(status_code=400, detail="No face found in image")
-    face = max(faces, key=lambda f: (f.bbox[2]-f.bbox[0])*(f.bbox[3]-f.bbox[1]))
-    emb = face.normed_embedding
-    if emb is None:
-        raise HTTPException(status_code=400, detail="Failed to compute embedding")
-
+@app.post("/admin/delete_person_by_id")
+async def delete_person_by_id(id: int = Form(...)):
+    if not admin_logged_in:
+        raise HTTPException(status_code=403)
     with SessionLocal() as s:
-        p = s.scalar(select(Person).where(Person.name == name))
-        if p is None:
-            # create if missing
-            p = Person(name=name, role=role, image_path=img_path, embedding=np_to_blob(emb))
-            s.add(p)
-        else:
-            p.role = role
-            p.image_path = img_path
-            p.embedding = np_to_blob(emb)
+        p = s.get(Person, id)
+        if not p:
+            raise HTTPException(status_code=404, detail="Person not found")
+        try:
+            if os.path.exists(p.image_path):
+                os.remove(p.image_path)
+        except Exception:
+            pass
+        s.delete(p)
         s.commit()
-
     rebuild_cache()
-    return {"status": "success", "message": f"Updated image for {name}"}
+    return {"status": "success", "message": "Person deleted"}

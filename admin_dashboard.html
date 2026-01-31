@@ -7,29 +7,30 @@
 </head>
 <body>
 
-<h2>Add Person</h2>
-<form id="addForm">
+<hr>
+
+<div style="display:flex; justify-content: space-between; align-items: center;">
+  <h2>Current Employees</h2>
+  <button class="btn" onclick="openStream()">Live Stream</button>
+</div>
+<table id="personsTable">
+  <tr>
+    <th>Name</th><th>Role</th><th>Image</th><th>Actions</th>
+  </tr>
+</table>
+
+<hr>
+<h2>Add Employee</h2>
+<form id="addForm" style="margin-bottom:12px;">
   <input name="name" placeholder="Name" required>
   <select name="role">
     <option value="authorized">Authorized</option>
     <option value="restricted">Restricted</option>
   </select>
   <input type="file" name="image" required>
-  <button>Add</button>
+  <button class="btn">Add</button>
 </form>
 <p id="addMsg"></p>
-
-<hr>
-
-<div style="display:flex; justify-content: space-between; align-items: center;">
-  <h2>Current Persons</h2>
-  <button class="btn" onclick="openStream()">Live Stream</button>
-</div>
-<table id="personsTable">
-  <tr>
-    <th>Name</th><th>Role</th><th>Actions</th>
-  </tr>
-</table>
 
 <hr>
 
@@ -47,52 +48,108 @@
   </tr>
 </table>
 
+<hr>
+
+<div id="toast" class="toast" style="display:none;"></div>
+
 <script>
-// Load persons with actions
+function showToast(msg, ok=true) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.background = ok ? 'rgba(16,185,129,.15)' : 'rgba(239,68,68,.15)';
+  t.style.border = ok ? '1px solid #10b981' : '1px solid #ef4444';
+  t.style.display = 'block';
+  setTimeout(() => t.style.display = 'none', 2500);
+}
+
 async function loadPersons() {
   const res = await fetch("/admin/persons");
   const persons = await res.json();
   const table = document.getElementById("personsTable");
   table.innerHTML = `
     <tr>
-      <th>Name</th><th>Role</th><th>Actions</th>
+      <th>Name</th><th>Role</th><th>Image</th><th>Actions</th>
     </tr>`;
   persons.forEach(p => {
+    const imgHref = p.image_path ? ('/' + p.image_path.replace(/^[\/]*/, '')) : '#';
     table.innerHTML += `
       <tr>
-        <td>${p.name}</td>
-        <td>${p.role}</td>
-        <td style="display:flex; gap:8px; align-items:center;">
-          <button class="btn" onclick="deletePerson('${p.name}')">Delete</button>
-          <label class="btn" style="position:relative;">
+        <td>
+          <input value="${p.name}" id="name_${p.id}" style="width:140px;">
+        </td>
+        <td>
+          <select id="role_${p.id}">
+            <option value="authorized" ${p.role==='authorized'?'selected':''}>Authorized</option>
+            <option value="restricted" ${p.role==='restricted'?'selected':''}>Restricted</option>
+          </select>
+        </td>
+        <td>
+          ${p.image_path ? `<a href="${imgHref}" target="_blank">View</a>` : '-'}
+          <label class="btn" style="margin-left:8px; position:relative;">
             Change Image
-            <input type="file" accept="image/*" style="position:absolute; inset:0; opacity:0;" onchange="updateImage('${p.name}', '${p.role}', this.files[0])">
+            <input type="file" accept="image/*" style="position:absolute; inset:0; opacity:0;"
+              onchange="updateImageById(${p.id}, document.getElementById('role_${p.id}').value, this.files[0])">
           </label>
+        </td>
+        <td style="display:flex; gap:8px; align-items:center;">
+          <button class="btn" onclick="editPerson(${p.id})">Save</button>
+          <button class="btn" style="background:#ef4444;" onclick="deletePersonById(${p.id})">Delete</button>
         </td>
       </tr>`;
   });
 }
 
-async function deletePerson(name) {
-  const form = new FormData();
-  form.append("name", name);
-  const res = await fetch("/admin/delete_person", { method: "POST", body: form });
+document.getElementById("addForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const formData = new FormData(e.target);
+  const res = await fetch("/admin/add_person", { method: "POST", body: formData });
   const data = await res.json();
-  alert(data.message || "Deleted");
+  showToast(data.message || "Added", res.ok);
+  loadPersons();
+};
+
+async function editPerson(id) {
+  const name = document.getElementById(`name_${id}`).value;
+  const role = document.getElementById(`role_${id}`).value;
+  const form = new FormData();
+  form.append("id", id);
+  form.append("name", name);
+  form.append("role", role);
+  const ok = confirm(`Save changes for ${name}?`);
+  if (!ok) return;
+  const res = await fetch("/admin/edit_person", { method: "POST", body: form });
+  const data = await res.json();
+  showToast(data.message || "Updated", res.ok);
   loadPersons();
 }
 
-async function updateImage(name, role, file) {
+async function updateImageById(id, role, file) {
   if (!file) return;
+  const ok = confirm("Replace image?");
+  if (!ok) return;
   const form = new FormData();
-  form.append("name", name);
+  form.append("id", id);
   form.append("role", role);
   form.append("image", file);
-  const res = await fetch("/admin/update_image", { method: "POST", body: form });
+  const res = await fetch("/admin/update_image_by_id", { method: "POST", body: form });
   const data = await res.json();
-  alert(data.message || "Updated");
+  showToast(data.message || "Image updated", res.ok);
   loadPersons();
 }
+
+async function deletePersonById(id) {
+  const ok = confirm("Delete this person?");
+  if (!ok) return;
+  const form = new FormData();
+  form.append("id", id);
+  const res = await fetch("/admin/delete_person_by_id", { method: "POST", body: form });
+  const data = await res.json();
+  showToast(data.message || "Deleted", res.ok);
+  loadPersons();
+}
+
+// initial load
+loadPersons();
 
 function openStream() {
   window.open("/stream", "_blank");
@@ -119,15 +176,6 @@ async function loadEvents() {
       </tr>`;
   });
 }
-
-document.getElementById("addForm").onsubmit = async (e) => {
-  e.preventDefault();
-  const formData = new FormData(e.target);
-  const res = await fetch("/admin/add_person", { method: "POST", body: formData });
-  const data = await res.json();
-  addMsg.innerText = data.message || "Added";
-  loadPersons();
-};
 
 // WebSocket alerts (same as /events page, with banner update)
 (function setupAlertsWS() {
@@ -165,6 +213,15 @@ document.getElementById("addForm").onsubmit = async (e) => {
 loadPersons();
 loadEvents();
 </script>
+
+<style>
+.toast {
+  margin: 10px 0 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  color: #e5e7eb;
+}
+</style>
 
 </body>
 </html>
