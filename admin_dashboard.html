@@ -36,6 +36,13 @@
 
 <h2>Event Logs</h2>
 
+<div style="display:flex; gap:8px; align-items:center; margin:8px 0;">
+  <label>From <input type="date" id="startDate"></label>
+  <label>To <input type="date" id="endDate"></label>
+  <button class="btn" onclick="applyFilter()">Apply Filter</button>
+  <button class="btn" onclick="exportCSV()">Export CSV</button>
+</div>
+
 <!-- Live alert banner -->
 <div id="alertBanner" class="alert-banner" style="display:none;">
   <strong>SECURITY ALERT:</strong> <span id="alertText"></span>
@@ -71,7 +78,7 @@ async function loadPersons() {
       <th>Name</th><th>Role</th><th>Image</th><th>Actions</th>
     </tr>`;
   persons.forEach(p => {
-    const imgHref = p.image_path ? ('/' + p.image_path.replace(/^[\/]*/, '')) : '#';
+    const imgHref = p.image_path ? ('/' + p.image_path.replace(/^[\/]*/, '').replace(/\\/g,'/')) : '#';
     table.innerHTML += `
       <tr>
         <td>
@@ -155,8 +162,29 @@ function openStream() {
   window.open("/stream", "_blank");
 }
 
+function getFilterQS() {
+  const s = document.getElementById('startDate').value;
+  const e = document.getElementById('endDate').value;
+  const params = new URLSearchParams();
+  if (s) params.set('start', s);
+  if (e) params.set('end', e);
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
+}
+
+function applyFilter() {
+  loadEvents();
+}
+
+function exportCSV() {
+  const qs = getFilterQS();
+  // open in new tab to trigger download
+  window.open(`/admin/events/export${qs}`, '_blank');
+}
+
 async function loadEvents() {
-  const res = await fetch("/admin/events");
+  const qs = getFilterQS();
+  const res = await fetch(`/admin/events${qs}`);
   const data = await res.json();
   const table = document.getElementById("eventsTable");
   table.innerHTML = `
@@ -165,6 +193,7 @@ async function loadEvents() {
       <th>Auth</th><th>Restr</th><th>Unk</th><th>Snapshot</th>
     </tr>`;
   data.forEach(e => {
+    const href = e.snapshot ? `/${e.snapshot}` : '#';
     table.innerHTML += `
       <tr>
         <td>${e.time}</td>
@@ -172,7 +201,7 @@ async function loadEvents() {
         <td>${e.authorized}</td>
         <td>${e.restricted}</td>
         <td>${e.unknown}</td>
-        <td><a href="/${e.snapshot}" target="_blank">View</a></td>
+        <td>${e.snapshot ? `<a href="${href}" target="_blank">View</a>` : '-'}</td>
       </tr>`;
   });
 }

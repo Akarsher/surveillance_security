@@ -6,7 +6,8 @@ from fastapi.responses import StreamingResponse, HTMLResponse, FileResponse, JSO
 from datetime import datetime, timedelta
 import anyio
 from fastapi.staticfiles import StaticFiles
-from fastapi import Form, Body, UploadFile, File, HTTPException
+from fastapi import Form, Body, UploadFile, File, HTTPException, Query
+import io
 import shutil
 import numpy as np
 from typing import Optional
@@ -42,6 +43,9 @@ STATIC_DIR = "static"
 os.makedirs(SNAPSHOT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(STATIC_DIR, exist_ok=True)
+
+app.mount("/snapshots", StaticFiles(directory=SNAPSHOT_DIR), name="snapshots")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # =============================
 # WEBSOCKET MANAGER
@@ -169,17 +173,16 @@ last_alert = None  # <-- cache last alert for new WS clients
 # CSV LOGGER
 # =============================
 def log_event(reason, a, r, u, snapshot):
-    # normalize to snapshots/<file>
-    snap = snapshot
-    if not snap.startswith("snapshots/"):
-        snap = f"snapshots/{os.path.basename(snapshot)}"
+    # normalize to URL-friendly path under /snapshots
+    fname = os.path.basename(snapshot)
+    snap = f"snapshots/{fname}"
     with SessionLocal() as s:
         s.add(Event(
+            time=datetime.now(),
             reason=reason, authorized=a, restricted=r, unknown=u,
             snapshot_path=snap
         ))
-        # prune > 2 days using Event.time
-        cutoff = datetime.utcnow() - timedelta(days=2)
+        cutoff = datetime.now() - timedelta(days=2)
         s.execute(delete(Event).where(Event.time < cutoff))
         s.commit()
 
@@ -338,10 +341,28 @@ def events_page():
     """
 
 @app.get("/admin/events")
-def admin_events():
+def admin_events(start: Optional[str] = Query(None), end: Optional[str] = Query(None)):
+    # start/end format: YYYY-MM-DD
+    def parse_date(s: Optional[str]):
+        try:
+            return datetime.strptime(s, "%Y-%m-%d") if s else None
+        except Exception:
+            return None
+
+    start_dt = parse_date(start)
+    end_dt = parse_date(end)
+    # end exclusive: next day for simpler query
+    end_exclusive = end_dt + timedelta(days=1) if end_dt else None
+
     items = []
     with SessionLocal() as s:
-        events = s.scalars(select(Event).order_by(Event.time.desc())).all()
+        stmt = select(Event)
+        if start_dt:
+            stmt = stmt.where(Event.time >= start_dt)
+        if end_exclusive:
+            stmt = stmt.where(Event.time < end_exclusive)
+        stmt = stmt.order_by(Event.time.desc())
+        events = s.scalars(stmt).all()
         for e in events:
             items.append({
                 "time": e.time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -353,12 +374,49 @@ def admin_events():
             })
     return JSONResponse(items)
 
-app.mount("/snapshots", StaticFiles(directory=SNAPSHOT_DIR), name="snapshots")
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+@app.get("/admin/events/export")
+def admin_events_export(start: Optional[str] = Query(None), end: Optional[str] = Query(None)):
+    # start/end format: YYYY-MM-DD
+    def parse_date(s: Optional[str]):
+        try:
+            return datetime.strptime(s, "%Y-%m-%d") if s else None
+        except Exception:
+            return None
 
-# =============================
-# ADMIN ROUTES  
-# =============================
+    start_dt = parse_date(start)
+    end_dt = parse_date(end)
+    end_exclusive = end_dt + timedelta(days=1) if end_dt else None
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Time", "Reason", "Authorized", "Restricted", "Unknown", "Snapshot"])
+
+    with SessionLocal() as s:
+        stmt = select(Event)
+        if start_dt:
+            stmt = stmt.where(Event.time >= start_dt)
+        if end_exclusive:
+            stmt = stmt.where(Event.time < end_exclusive)
+        stmt = stmt.order_by(Event.time.desc())
+        for e in s.scalars(stmt).all():
+            writer.writerow([
+                e.time.strftime("%Y-%m-%d %H:%M:%S"),
+                e.reason,
+                e.authorized,
+                e.restricted,
+                e.unknown,
+                e.snapshot_path or ""
+            ])
+
+    output.seek(0)
+    headers = {"Content-Disposition": 'attachment; filename="events.csv"'}
+    return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers=headers)
+
+@app.get("/admin")
+def admin_page():
+    if not admin_logged_in:
+        return FileResponse("admin_login.html")
+    return FileResponse("admin_dashboard.html")
 
 @app.post("/admin/login")
 def admin_login(data: dict = Body(...)):
@@ -370,12 +428,6 @@ def admin_login(data: dict = Body(...)):
         admin_logged_in = True
         return {"status": "success"}
     return {"status": "fail"}
-
-@app.get("/admin")
-def admin_page():
-    if not admin_logged_in:
-        return FileResponse("admin_login.html")
-    return FileResponse("admin_dashboard.html")
 
 @app.post("/admin/add_person")
 async def add_person(
