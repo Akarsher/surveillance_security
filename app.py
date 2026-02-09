@@ -19,12 +19,16 @@ from db import SessionLocal, init_db, Person, Event
 os.environ.setdefault("INSIGHTFACE_HOME", os.path.join(os.getcwd(), ".insightface"))
 
 from insightface.app import FaceAnalysis
+import onnxruntime as ort
 
 app = FastAPI()
 
 # Init InsightFace (use env var for portability)
-face_app = FaceAnalysis(name="buffalo_s", root=os.environ["INSIGHTFACE_HOME"])
-face_app.prepare(ctx_id=-1, det_size=(640, 640))  # CPU mode
+available_providers = ort.get_available_providers()
+use_cuda = "CUDAExecutionProvider" in available_providers
+providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if use_cuda else ["CPUExecutionProvider"]
+face_app = FaceAnalysis(name="buffalo_s", root=os.environ["INSIGHTFACE_HOME"], providers=providers)
+face_app.prepare(ctx_id=0 if use_cuda else -1, det_size=(640, 640))
 
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "admin123"

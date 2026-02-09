@@ -22,3 +22,8 @@ o	Review past alerts and logs.
 - 7.	Scalability and Flexibility
 o	Can integrate multiple cameras.
 o	Can modify constraint rules as needed.
+
+## Optional GPU (CUDA)
+- Install a CUDA-enabled ONNX Runtime build: `pip install onnxruntime-gpu`
+- Ensure NVIDIA CUDA drivers/toolkit are installed for your GPU
+- The app auto-selects CUDA when available, otherwise uses CPU
