@@ -50,6 +50,7 @@ os.makedirs(STATIC_DIR, exist_ok=True)
 
 app.mount("/snapshots", StaticFiles(directory=SNAPSHOT_DIR), name="snapshots")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/known_faces", StaticFiles(directory=KNOWN_FACES_DIR), name="known_faces")
 
 # =============================
 # WEBSOCKET MANAGER
@@ -216,18 +217,22 @@ def generate_frames():
             faces = face_app.get(small)
 
             for f in faces:
-                x1, y1, x2, y2 = (f.bbox * 2).astype(int)
+                # bbox is [x1, y1, x2, y2], scale back to original frame
+                bbox = (f.bbox * 2).astype(int)
+                x1, y1, x2, y2 = bbox[0], bbox[1], bbox[2], bbox[3]
                 emb = f.normed_embedding
                 name, role = "Unknown", "unknown"
 
                 if emb is not None and enc_mat is not None:
                     sims = enc_mat @ emb.astype(np.float32)
-                    i = int(np.argmax(sims)); best = float(sims[i])
+                    i = int(np.argmax(sims))
+                    best = float(sims[i])
                     if best >= 0.45:
                         name = known_names[i]
                         role = known_roles[i]
 
-                last_locs.append((y1, x2, y2, x1))
+                # Store as (x1, y1, x2, y2) for clarity
+                last_locs.append((x1, y1, x2, y2))
                 last_names.append(name)
                 last_roles.append(role)
 
@@ -279,10 +284,12 @@ def generate_frames():
                 print("[ALERT]", reason)
 
         # draw overlays (uses latest last_*)
-        for (t, rg, b, l), name, role in zip(last_locs, last_names, last_roles):
-            color = (0,255,0) if role == "authorized" else (0,165,255) if role == "restricted" else (0,0,255)
-            cv2.rectangle(frame, (l, t), (rg, b), color, 1)
-            cv2.putText(frame, name, (l, max(0, t - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+        for (x1, y1, x2, y2), name, role in zip(last_locs, last_names, last_roles):
+            color = (0, 255, 0) if role == "authorized" else (0, 165, 255) if role == "restricted" else (0, 0, 255)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            # Draw name above the box with better visibility
+            label_y = max(y1 - 10, 20)
+            cv2.putText(frame, name, (x1, label_y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
         # yield MJPEG chunk
         ret, buffer = cv2.imencode('.jpg', frame)
@@ -416,11 +423,25 @@ def admin_events_export(start: Optional[str] = Query(None), end: Optional[str] =
     headers = {"Content-Disposition": 'attachment; filename="events.csv"'}
     return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers=headers)
 
-@app.get("/admin")
-def admin_page():
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_dashboard():
     if not admin_logged_in:
-        return FileResponse("admin_login.html")
-    return FileResponse("admin_dashboard.html")
+        return FileResponse("templates/admin_login.html")
+    return FileResponse("templates/admin_dashboard.html")
+
+@app.get("/admin/employees", response_class=HTMLResponse)
+def admin_employees_page():
+    if not admin_logged_in:
+        return FileResponse("templates/admin_login.html")
+    return FileResponse("templates/admin_employees.html")
+
+@app.get("/admin/logs", response_class=HTMLResponse)
+def admin_logs_page():
+    if not admin_logged_in:
+        return FileResponse("templates/admin_login.html")
+    return FileResponse("templates/admin_logs.html")
 
 @app.post("/admin/login")
 def admin_login(data: dict = Body(...)):
@@ -432,6 +453,12 @@ def admin_login(data: dict = Body(...)):
         admin_logged_in = True
         return {"status": "success"}
     return {"status": "fail"}
+
+@app.post("/admin/logout")
+def admin_logout():
+    global admin_logged_in
+    admin_logged_in = False
+    return {"status": "success"}
 
 @app.post("/admin/add_person")
 async def add_person(
@@ -484,7 +511,16 @@ def get_persons():
         raise HTTPException(status_code=403)
     with SessionLocal() as s:
         people = s.scalars(select(Person)).all()
-        return [{"id": p.id, "name": p.name, "role": p.role, "image_path": p.image_path} for p in people]
+        return [
+            {
+                "id": p.id,
+                "name": p.name,
+                "role": p.role,
+                # Normalize path with forward slashes
+                "image_path": p.image_path.replace("\\", "/") if p.image_path else None
+            }
+            for p in people
+        ]
 
 @app.post("/admin/edit_person")
 async def edit_person(

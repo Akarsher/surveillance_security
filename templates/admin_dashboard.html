@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Admin Dashboard</title>
+  <link rel="stylesheet" href="/static/admin.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-actions">
+        <button class="btn btn-danger" onclick="logout()">🚪 Logout</button>
+      </div>
+      <h1>🔐 Security System Dashboard</h1>
+      <p class="subtitle">Manage employees, view security logs, and monitor live stream</p>
+    </header>
+
+    <div class="dashboard-grid">
+      <div class="card" onclick="location.href='/admin/employees'">
+        <div class="card-icon">👥</div>
+        <h2>Employees</h2>
+        <p>View, add, edit, and delete registered employees</p>
+      </div>
+
+      <div class="card" onclick="location.href='/admin/logs'">
+        <div class="card-icon">📋</div>
+        <h2>Security Logs</h2>
+        <p>View event logs with date filters and export options</p>
+      </div>
+
+      <div class="card" onclick="location.href='/stream'">
+        <div class="card-icon">📹</div>
+        <h2>Live Stream</h2>
+        <p>Monitor live camera feed with face recognition</p>
+      </div>
+    </div>
+
+    <!-- Live alert banner -->
+    <div id="alertBanner" class="alert-banner" style="display:none;">
+      <strong>🚨 SECURITY ALERT:</strong> <span id="alertText"></span>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" style="display:none;"></div>
+
+  <script>
+  async function logout() {
+    if (!confirm("Are you sure you want to logout?")) return;
+    await fetch("/admin/logout", { method: "POST" });
+    location.href = "/admin";
+  }
+
+  // WebSocket alerts
+  (function setupAlertsWS() {
+    const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(`${scheme}://${location.host}/ws/alerts`);
+    const banner = document.getElementById('alertBanner');
+    const text = document.getElementById('alertText');
+
+    ws.onopen = () => {
+      ws.send('hello');
+      setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+      }, 30000);
+    };
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      text.textContent = `${data.reason} — Auth:${data.authorized} Restr:${data.restricted} Unk:${data.unknown}`;
+      banner.style.display = 'block';
+    };
+  })();
+  </script>
+</body>
+</html>

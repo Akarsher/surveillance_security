@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Employee Management</title>
+  <link rel="stylesheet" href="/static/admin.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-actions">
+        <button class="btn btn-secondary" onclick="location.href='/admin'">← Back to Dashboard</button>
+        <button class="btn btn-danger" onclick="logout()">🚪 Logout</button>
+      </div>
+      <h1>👥 Employee Management</h1>
+      <p class="subtitle">Manage registered employees in the security system</p>
+    </header>
+
+    <!-- Add Employee Section -->
+    <section class="section">
+      <h2>➕ Add New Employee</h2>
+      <form id="addForm" class="form-row">
+        <input name="name" placeholder="Employee Name" required class="input">
+        <select name="role" class="input">
+          <option value="authorized">Authorized</option>
+          <option value="restricted">Restricted</option>
+        </select>
+        <input type="file" name="image" accept="image/*" required class="input">
+        <button type="submit" class="btn btn-primary">Add Employee</button>
+      </form>
+    </section>
+
+    <!-- Current Employees Section -->
+    <section class="section">
+      <h2>📋 Current Employees</h2>
+      <table id="personsTable" class="data-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Role</th>
+            <th>Image</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </div>
+
+  <div id="toast" class="toast" style="display:none;"></div>
+
+  <script>
+  async function logout() {
+    if (!confirm("Are you sure you want to logout?")) return;
+    await fetch("/admin/logout", { method: "POST" });
+    location.href = "/admin";
+  }
+
+  function showToast(msg, ok=true) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = ok ? 'toast toast-success' : 'toast toast-error';
+    t.style.display = 'block';
+    setTimeout(() => t.style.display = 'none', 3000);
+  }
+
+  async function loadPersons() {
+    const res = await fetch("/admin/persons");
+    if (!res.ok) {
+      showToast("Failed to load employees", false);
+      return;
+    }
+    const persons = await res.json();
+    const tbody = document.querySelector("#personsTable tbody");
+    tbody.innerHTML = '';
+
+    if (persons.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" class="empty-msg">No employees registered</td></tr>';
+      return;
+    }
+
+    persons.forEach(p => {
+      // Normalize path: replace backslashes and ensure leading slash
+      const imgHref = p.image_path 
+        ? '/' + p.image_path.replace(/\\/g, '/').replace(/^\/+/, '')
+        : '#';
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td>
+          <input value="${p.name}" id="name_${p.id}" class="input inline-input">
+        </td>
+        <td>
+          <select id="role_${p.id}" class="input inline-select">
+            <option value="authorized" ${p.role==='authorized'?'selected':''}>Authorized</option>
+            <option value="restricted" ${p.role==='restricted'?'selected':''}>Restricted</option>
+          </select>
+        </td>
+        <td>
+          ${p.image_path ? `<a href="${imgHref}" target="_blank" class="link">View</a>` : '-'}
+          <label class="btn btn-small btn-secondary" style="margin-left:8px;">
+            Change
+            <input type="file" accept="image/*" style="display:none;"
+              onchange="updateImageById(${p.id}, document.getElementById('role_${p.id}').value, this.files[0])">
+          </label>
+        </td>
+        <td class="actions-cell">
+          <button class="btn btn-small btn-primary" onclick="editPerson(${p.id})">Save</button>
+          <button class="btn btn-small btn-danger" onclick="deletePersonById(${p.id})">Delete</button>
+        </td>
+      `;
+      tbody.appendChild(row);
+    });
+  }
+
+  document.getElementById("addForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const res = await fetch("/admin/add_person", { method: "POST", body: formData });
+    const data = await res.json();
+    showToast(data.message || (res.ok ? "Employee added" : "Failed to add"), res.ok);
+    if (res.ok) {
+      e.target.reset();
+      loadPersons();
+    }
+  };
+
+  async function editPerson(id) {
+    const name = document.getElementById(`name_${id}`).value.trim();
+    const role = document.getElementById(`role_${id}`).value;
+    if (!name) {
+      showToast("Name cannot be empty", false);
+      return;
+    }
+    if (!confirm(`Save changes for "${name}"?`)) return;
+
+    const form = new FormData();
+    form.append("id", id);
+    form.append("name", name);
+    form.append("role", role);
+    const res = await fetch("/admin/edit_person", { method: "POST", body: form });
+    const data = await res.json();
+    showToast(data.message || (res.ok ? "Updated" : "Failed"), res.ok);
+    loadPersons();
+  }
+
+  async function updateImageById(id, role, file) {
+    if (!file) return;
+    if (!confirm("Replace image for this employee?")) return;
+
+    const form = new FormData();
+    form.append("id", id);
+    form.append("role", role);
+    form.append("image", file);
+    const res = await fetch("/admin/update_image_by_id", { method: "POST", body: form });
+    const data = await res.json();
+    showToast(data.message || (res.ok ? "Image updated" : "Failed"), res.ok);
+    loadPersons();
+  }
+
+  async function deletePersonById(id) {
+    if (!confirm("Are you sure you want to delete this employee?")) return;
+
+    const form = new FormData();
+    form.append("id", id);
+    const res = await fetch("/admin/delete_person_by_id", { method: "POST", body: form });
+    const data = await res.json();
+    showToast(data.message || (res.ok ? "Deleted" : "Failed"), res.ok);
+    loadPersons();
+  }
+
+  loadPersons();
+  </script>
+</body>
+</html>

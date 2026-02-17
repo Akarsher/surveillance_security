@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Admin Login</title>
+  <link rel="stylesheet" href="/static/admin.css">
+</head>
+<body>
+  <div class="container" style="display:flex; justify-content:center; align-items:center; min-height:100vh;">
+    <div class="section" style="max-width:400px; width:100%;">
+      <h2 style="text-align:center; margin-bottom:24px;">🔐 Admin Login</h2>
+
+      <div class="form-column">
+        <label for="user">Username</label>
+        <input id="user" class="input" placeholder="Username" style="width:100%; margin-bottom:16px;">
+
+        <label for="pass">Password</label>
+        <input id="pass" type="password" class="input" placeholder="Password" style="width:100%; margin-bottom:24px;">
+
+        <button class="btn btn-primary" onclick="login()" style="width:100%;">Login</button>
+
+        <p id="msg" style="color:#ef4444; text-align:center; margin-top:16px;"></p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  async function login() {
+    const res = await fetch("/admin/login", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        username: document.getElementById("user").value,
+        password: document.getElementById("pass").value
+      })
+    });
+
+    const data = await res.json();
+    if (data.status === "success") {
+      location.reload();
+    } else {
+      document.getElementById("msg").innerText = "Invalid credentials";
+    }
+  }
+
+  // Allow Enter key to submit
+  document.addEventListener("keypress", function(e) {
+    if (e.key === "Enter") login();
+  });
+  </script>
+</body>
+</html>
