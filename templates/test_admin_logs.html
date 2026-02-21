@@ -1,0 +1,193 @@
+    <title>Security Logs</title>    <link rel="stylesheet" href="/static/admin.css">    <div class="container">        <header>            <div class="header-actions">                <button class="btn btn-secondary" onclick="location.href='/admin'">← Back to Dashboard</button>                <button class="btn btn-danger" onclick="logout()">🚪 Logout</button>            </div>            <h1>📋 Security Logs</h1>            <p class="subtitle">View and filter security event logs</p>        </header>        <!-- Live alert banner -->        <div id="alertBanner" class="alert-banner" style="display:none;">            <strong>🚨 SECURITY ALERT:</strong> <span id="alertText"></span>        </div>
+
+        <!-- Filters Section -->
+        <section class="section">
+            <h2>🔍 Filter Events</h2>
+            <div class="filter-row">
+                <label class="filter-item">
+                    From:
+                    <input type="date" id="startDate" class="input">
+                </label>
+                <label class="filter-item">
+                    To:
+                    <input type="date" id="endDate" class="input">
+                </label>
+                <button class="btn btn-primary" onclick="applyFilter()">Apply Filter</button>
+                <button class="btn btn-secondary" onclick="clearFilter()">Clear</button>
+                <button class="btn btn-secondary" onclick="exportCSV()">📥 Export CSV</button>
+            </div>
+        </section>
+
+        <!-- Security Events Table (Violations) -->
+        <section class="section">
+            <h2>🚨 Security Violations</h2>
+            <div class="table-container">
+                <table id="eventsTable" class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Reason</th>
+                            <th>Authorized</th>
+                            <th>Restricted</th>
+                            <th>Unknown</th>
+                            <th>Snapshot</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Entry Log Table (Correct Entries) -->
+        <section class="section">
+            <h2>✅ Entry Log (Authorized Access)</h2>
+            <div class="table-container">
+                <table id="entriesTable" class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Time</th>
+                            <th>No. of People</th>
+                            <th>Employee Names</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <div id="toast" class="toast" style="display:none;"></div>
+
+    <script>
+    async function logout() {
+        if (!confirm("Are you sure you want to logout?")) return;
+        await fetch("/admin/logout", { method: "POST" });
+        location.href = "/admin";
+    }
+
+    function showToast(msg, ok=true) {
+        const t = document.getElementById('toast');
+        t.textContent = msg;
+        t.className = ok ? 'toast toast-success' : 'toast toast-error';
+        t.style.display = 'block';
+        setTimeout(() => t.style.display = 'none', 3000);
+    }
+
+    function getFilterQS() {
+        const s = document.getElementById('startDate').value;
+        const e = document.getElementById('endDate').value;
+        const params = new URLSearchParams();
+        if (s) params.set('start', s);
+        if (e) params.set('end', e);
+        const qs = params.toString();
+        return qs ? `?${qs}` : '';
+    }
+
+    function applyFilter() {
+        loadEvents();
+        loadEntries();
+    }
+
+    function clearFilter() {
+        document.getElementById('startDate').value = '';
+        document.getElementById('endDate').value = '';
+        loadEvents();
+        loadEntries();
+    }
+
+    function exportCSV() {
+        const qs = getFilterQS();
+        window.open(`/admin/events/export${qs}`, '_blank');
+    }
+
+    // Load Security Violations
+    async function loadEvents() {
+        const qs = getFilterQS();
+        const res = await fetch(`/admin/events${qs}`);
+        if (!res.ok) {
+            showToast("Failed to load events", false);
+            return;
+        }
+        const data = await res.json();
+        const tbody = document.querySelector("#eventsTable tbody");
+        tbody.innerHTML = '';
+
+        if (data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="empty-msg">No security violations found</td></tr>';
+            return;
+        }
+
+        data.forEach(e => {
+            const href = e.snapshot ? `/${e.snapshot}` : '#';
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${e.time}</td>
+                <td class="reason-cell">${e.reason}</td>
+                <td class="count-cell">${e.authorized}</td>
+                <td class="count-cell">${e.restricted}</td>
+                <td class="count-cell">${e.unknown}</td>
+                <td>${e.snapshot ? `<a href="${href}" target="_blank" class="link">View</a>` : '-'}</td>
+            `;
+            tbody.appendChild(row);
+        });
+    }
+
+    // Load Entry Log (Authorized Access)
+    async function loadEntries() {
+        const qs = getFilterQS();
+        const res = await fetch(`/admin/entries${qs}`);
+        if (!res.ok) {
+            showToast("Failed to load entry log", false);
+            return;
+        }
+        const data = await res.json();
+        const tbody = document.querySelector("#entriesTable tbody");
+        tbody.innerHTML = '';
+
+        if (data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="empty-msg">No entries found</td></tr>';
+            return;
+        }
+
+        data.forEach(e => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${e.date}</td>
+                <td>${e.time}</td>
+                <td class="count-cell">${e.count}</td>
+                <td class="names-cell">${e.names.join(', ') || '-'}</td>
+            `;
+            tbody.appendChild(row);
+        });
+    }
+
+    // WebSocket alerts
+    (function setupAlertsWS() {
+        const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+        const ws = new WebSocket(`${scheme}://${location.host}/ws/alerts`);
+        const banner = document.getElementById('alertBanner');
+        const text = document.getElementById('alertText');
+
+        ws.onopen = () => {
+            ws.send('hello');
+            setInterval(() => {
+                if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+            }, 30000);
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            text.textContent = `${data.reason} — Auth:${data.authorized} Restr:${data.restricted} Unk:${data.unknown}`;
+            banner.style.display = 'block';
+            loadEvents();
+            loadEntries();
+        };
+    })();
+
+    // Initial load
+    loadEvents();
+    loadEntries();
+    </script>
+</body>
+</html>

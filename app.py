@@ -160,11 +160,79 @@ def on_shutdown():
         pass
 
 # =============================
-# CAMERA
+# CAMERA CONFIGURATION
 # =============================
-camera = cv2.VideoCapture(0)
-camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-camera.set(cv2.CAP_PROP_FPS, 10)
+CAMERA_CONFIG = {
+    "type": "ip",  # Change to "webcam" to use laptop camera
+    "rtsp_url": "rtsp://rishitj:rishitj1972@192.168.1.2:554/stream2",  # Replace with your details
+    "webcam_index": 0,
+    "reconnect_delay": 5,
+}
+
+# =============================
+# CAMERA CLASS WITH RECONNECTION
+# =============================
+import time
+
+class CameraStream:
+    def __init__(self, config: dict):
+        self.config = config
+        self.cap = None
+        self.lock = threading.Lock()
+        self.running = True
+        self._connect()
+
+    def _connect(self):
+        with self.lock:
+            if self.cap is not None:
+                try:
+                    self.cap.release()
+                except:
+                    pass
+
+            if self.config["type"] == "ip":
+                url = self.config["rtsp_url"]
+                print(f"[CAMERA] Connecting to IP camera...")
+                self.cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+            else:
+                print(f"[CAMERA] Connecting to webcam...")
+                self.cap = cv2.VideoCapture(self.config["webcam_index"])
+            
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            
+            if self.cap.isOpened():
+                print("[CAMERA] Connected successfully")
+            else:
+                print("[CAMERA] Failed to connect")
+
+    def read(self):
+        with self.lock:
+            if self.cap is None or not self.cap.isOpened():
+                return False, None
+            
+            # Clear buffer for IP camera
+            if self.config["type"] == "ip":
+                self.cap.grab()
+            
+            return self.cap.read()
+
+    def reconnect(self):
+        print(f"[CAMERA] Reconnecting in {self.config['reconnect_delay']} seconds...")
+        time.sleep(self.config["reconnect_delay"])
+        self._connect()
+
+    def release(self):
+        self.running = False
+        with self.lock:
+            if self.cap is not None:
+                self.cap.release()
+
+    def is_opened(self):
+        with self.lock:
+            return self.cap is not None and self.cap.isOpened()
+
+# Replace old camera initialization
+camera = CameraStream(CAMERA_CONFIG)
 
 # =============================
 # ALERT CONFIG
@@ -201,13 +269,21 @@ def generate_frames():
     last_locs, last_names, last_roles = [], [], []
     reason = ""
     a = r = u = 0
-    last_reason = None  # track last fired reason
+    last_reason = None
+    consecutive_failures = 0
 
-    while True:
+    while camera.running:
         success, frame = camera.read()
-        if not success:
-            break
-
+        
+        if not success or frame is None:
+            consecutive_failures += 1
+            if consecutive_failures >= 30:
+                camera.reconnect()
+                consecutive_failures = 0
+            time.sleep(0.1)
+            continue
+        
+        consecutive_failures = 0
         frame_count += 1
 
         if frame_count % process_every_n_frames == 0:
