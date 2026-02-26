@@ -163,8 +163,8 @@ def on_shutdown():
 # CAMERA CONFIGURATION
 # =============================
 CAMERA_CONFIG = {
-    "type": "ip",  # Change to "webcam" to use laptop camera
-    "rtsp_url": "rtsp://rishitj:rishitj1972@192.168.1.2:554/stream2",  # Replace with your details
+    "type": None,  # Start with no camera selected
+    "rtsp_url": "rtsp://rishitj:rishitj1972@192.168.1.2:554/stream2",
     "webcam_index": 0,
     "reconnect_delay": 5,
 }
@@ -180,30 +180,113 @@ class CameraStream:
         self.cap = None
         self.lock = threading.Lock()
         self.running = True
-        self._connect()
+        self.active_type = None  # Track which camera is currently active
+        self.last_error = None  # Track connection errors
 
     def _connect(self):
         with self.lock:
+            self.last_error = None
+            
             if self.cap is not None:
                 try:
                     self.cap.release()
                 except:
                     pass
+                self.cap = None
 
-            if self.config["type"] == "ip":
-                url = self.config["rtsp_url"]
-                print(f"[CAMERA] Connecting to IP camera...")
-                self.cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
-            else:
-                print(f"[CAMERA] Connecting to webcam...")
-                self.cap = cv2.VideoCapture(self.config["webcam_index"])
+            if self.config["type"] is None:
+                print("[CAMERA] No camera selected")
+                self.active_type = None
+                return False
+
+            try:
+                if self.config["type"] == "ip":
+                    url = self.config["rtsp_url"]
+                    print(f"[CAMERA] Connecting to IP camera...")
+                    self.cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+                    self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    
+                    # Test connection by reading a frame
+                    if not self.cap.isOpened():
+                        self.last_error = "Failed to open RTSP stream. Check IP address and credentials."
+                        print(f"[CAMERA] Error: {self.last_error}")
+                        self.cap = None
+                        self.active_type = None
+                        return False
+                    
+                    # Try to read a test frame with timeout
+                    ret, _ = self.cap.read()
+                    if not ret:
+                        self.last_error = "Connected but cannot read frames. Camera may be offline or credentials invalid."
+                        print(f"[CAMERA] Error: {self.last_error}")
+                        self.cap.release()
+                        self.cap = None
+                        self.active_type = None
+                        return False
+                        
+                else:
+                    print(f"[CAMERA] Connecting to webcam...")
+                    self.cap = cv2.VideoCapture(self.config["webcam_index"])
+                    self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    
+                    if not self.cap.isOpened():
+                        self.last_error = "Failed to open webcam. It may be in use by another application."
+                        print(f"[CAMERA] Error: {self.last_error}")
+                        self.cap = None
+                        self.active_type = None
+                        return False
+
+                self.active_type = self.config["type"]
+                print(f"[CAMERA] Connected successfully to {self.active_type}")
+                return True
+                
+            except Exception as e:
+                self.last_error = f"Connection error: {str(e)}"
+                print(f"[CAMERA] Exception: {self.last_error}")
+                if self.cap:
+                    try:
+                        self.cap.release()
+                    except:
+                        pass
+                self.cap = None
+                self.active_type = None
+                return False
+
+    def switch_camera(self, camera_type: str):
+        """Switch to a different camera type ('webcam', 'ip', or None)"""
+        # First stop current camera completely
+        self.stop_camera()
+        
+        # Set new camera type
+        self.config["type"] = camera_type
+        
+        # Connect to new camera
+        if camera_type:
+            return self._connect()
+        return True
+
+    def stop_camera(self):
+        """Stop the current camera completely"""
+        with self.lock:
+            print("[CAMERA] Stopping camera...")
             
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            # Release the capture device
+            if self.cap is not None:
+                try:
+                    self.cap.release()
+                    print("[CAMERA] Camera released")
+                except Exception as e:
+                    print(f"[CAMERA] Error releasing: {e}")
+                finally:
+                    self.cap = None
             
-            if self.cap.isOpened():
-                print("[CAMERA] Connected successfully")
-            else:
-                print("[CAMERA] Failed to connect")
+            # Reset state
+            self.config["type"] = None
+            self.active_type = None
+            self.last_error = None
+            
+        print("[CAMERA] Camera stopped successfully")
+        return True
 
     def read(self):
         with self.lock:
@@ -217,21 +300,31 @@ class CameraStream:
             return self.cap.read()
 
     def reconnect(self):
+        if self.config["type"] is None:
+            return False
         print(f"[CAMERA] Reconnecting in {self.config['reconnect_delay']} seconds...")
         time.sleep(self.config["reconnect_delay"])
-        self._connect()
+        return self._connect()
 
     def release(self):
         self.running = False
-        with self.lock:
-            if self.cap is not None:
-                self.cap.release()
+        self.stop_camera()
 
     def is_opened(self):
         with self.lock:
             return self.cap is not None and self.cap.isOpened()
 
-# Replace old camera initialization
+    def get_status(self):
+        with self.lock:
+            return {
+                "type": self.config["type"],
+                "active_type": self.active_type,
+                "connected": self.cap is not None and self.cap.isOpened(),
+                "rtsp_url": self.config["rtsp_url"].split("@")[-1] if self.config["rtsp_url"] else None,
+                "error": self.last_error,
+            }
+
+# Initialize camera (but don't connect yet)
 camera = CameraStream(CAMERA_CONFIG)
 
 # =============================
@@ -273,6 +366,19 @@ def generate_frames():
     consecutive_failures = 0
 
     while camera.running:
+        # Check if camera is active
+        if camera.config["type"] is None:
+            # No camera selected - yield a placeholder frame
+            placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
+            cv2.putText(placeholder, "No camera selected", (150, 240), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+            cv2.putText(placeholder, "Go to Dashboard to select a camera", (100, 280), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (150, 150, 150), 1)
+            ret, buffer = cv2.imencode('.jpg', placeholder)
+            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + bytearray(buffer) + b"\r\n"
+            time.sleep(0.5)
+            continue
+
         success, frame = camera.read()
         
         if not success or frame is None:
@@ -703,3 +809,44 @@ async def delete_person_by_id(id: int = Form(...)):
         s.commit()
     rebuild_cache()
     return {"status": "success", "message": "Person deleted"}
+
+# =============================
+# CAMERA CONTROL ENDPOINTS
+# =============================
+@app.get("/admin/camera/status")
+def camera_status():
+    if not admin_logged_in:
+        raise HTTPException(status_code=403)
+    return camera.get_status()
+
+@app.post("/admin/camera/switch")
+def camera_switch(data: dict = Body(...)):
+    if not admin_logged_in:
+        raise HTTPException(status_code=403)
+    
+    camera_type = data.get("type")  # "webcam", "ip", or None
+    
+    if camera_type not in [None, "webcam", "ip"]:
+        raise HTTPException(status_code=400, detail="Invalid camera type")
+    
+    success = camera.switch_camera(camera_type)
+    status = camera.get_status()
+    
+    return {
+        "status": "success" if success else "failed",
+        "message": f"Connected to {camera_type}" if success else status.get("error", "Connection failed"),
+        "connected": camera.is_opened(),
+        "error": status.get("error")
+    }
+
+@app.post("/admin/camera/stop")
+def camera_stop():
+    if not admin_logged_in:
+        raise HTTPException(status_code=403)
+    
+    camera.stop_camera()
+    return {
+        "status": "success", 
+        "message": "Camera stopped",
+        "connected": False
+    }

@@ -14,6 +14,36 @@
       <p class="subtitle">Manage employees, view security logs, and monitor live stream</p>
     </header>
 
+    <!-- Camera Selection Section -->
+    <section class="section camera-section">
+      <h2>📷 Camera Selection</h2>
+      <div class="camera-status" id="cameraStatus">
+        <span class="status-indicator" id="statusIndicator">●</span>
+        <span id="statusText">Loading...</span>
+      </div>
+      
+      <!-- Error display -->
+      <div id="cameraError" class="camera-error" style="display:none;">
+        <strong>⚠️ Error:</strong> <span id="errorText"></span>
+      </div>
+      
+      <div class="camera-controls">
+        <button class="btn btn-primary" id="btnWebcam" onclick="switchCamera('webcam')">
+          💻 Use Webcam
+        </button>
+        <button class="btn btn-primary" id="btnIpCam" onclick="switchCamera('ip')">
+          📹 Use IP Camera
+        </button>
+        <button class="btn btn-danger" id="btnStop" onclick="stopCamera()">
+          ⏹ Stop Camera
+        </button>
+      </div>
+      <p class="camera-hint">
+        <strong>Webcam:</strong> Built-in laptop camera<br>
+        <strong>IP Camera:</strong> Tapo security camera (RTSP)
+      </p>
+    </section>
+
     <div class="dashboard-grid">
       <div class="card" onclick="location.href='/admin/employees'">
         <div class="card-icon">👥</div>
@@ -27,10 +57,11 @@
         <p>View event logs with date filters and export options</p>
       </div>
 
-      <div class="card" onclick="location.href='/stream'">
+      <div class="card" id="streamCard" onclick="openStream()">
         <div class="card-icon">📹</div>
         <h2>Live Stream</h2>
         <p>Monitor live camera feed with face recognition</p>
+        <span class="card-badge" id="streamBadge">Select camera first</span>
       </div>
     </div>
 
@@ -42,9 +73,253 @@
 
   <div id="toast" class="toast" style="display:none;"></div>
 
+  <!-- Confirmation Modal -->
+  <div id="confirmModal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <h3 id="modalTitle">Confirm</h3>
+      <p id="modalMessage">Are you sure?</p>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" id="modalConfirmBtn">Confirm</button>
+      </div>
+    </div>
+  </div>
+
   <script>
+  let currentCamera = null;
+  let pendingAction = null;
+  let isConnecting = false;
+
+  // Toast notification
+  function showToast(msg, ok=true) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = ok ? 'toast toast-success' : 'toast toast-error';
+    t.style.display = 'block';
+    setTimeout(() => t.style.display = 'none', 4000);
+  }
+
+  // Show/hide error
+  function showError(message) {
+    const errorDiv = document.getElementById('cameraError');
+    const errorText = document.getElementById('errorText');
+    if (message) {
+      errorText.textContent = message;
+      errorDiv.style.display = 'block';
+    } else {
+      errorDiv.style.display = 'none';
+    }
+  }
+
+  // Modal functions
+  function showModal(title, message, onConfirm) {
+    document.getElementById('modalTitle').textContent = title;
+    document.getElementById('modalMessage').textContent = message;
+    document.getElementById('confirmModal').style.display = 'flex';
+    pendingAction = onConfirm;
+    document.getElementById('modalConfirmBtn').onclick = () => {
+      closeModal();
+      if (pendingAction) pendingAction();
+    };
+  }
+
+  function closeModal() {
+    document.getElementById('confirmModal').style.display = 'none';
+    pendingAction = null;
+  }
+
+  // Disable/enable buttons during operations
+  function setButtonsLoading(loading) {
+    const btns = ['btnWebcam', 'btnIpCam', 'btnStop'];
+    btns.forEach(id => {
+      document.getElementById(id).disabled = loading;
+    });
+    isConnecting = loading;
+  }
+
+  // Camera status
+  async function loadCameraStatus() {
+    if (isConnecting) return; // Don't refresh while connecting
+    
+    try {
+      const res = await fetch('/admin/camera/status');
+      const data = await res.json();
+      updateCameraUI(data);
+    } catch (e) {
+      console.error('Failed to load camera status:', e);
+    }
+  }
+
+  function updateCameraUI(status) {
+    currentCamera = status.active_type;
+    const indicator = document.getElementById('statusIndicator');
+    const text = document.getElementById('statusText');
+    const badge = document.getElementById('streamBadge');
+    const btnWebcam = document.getElementById('btnWebcam');
+    const btnIpCam = document.getElementById('btnIpCam');
+    const btnStop = document.getElementById('btnStop');
+
+    // Reset button states
+    btnWebcam.classList.remove('btn-active');
+    btnIpCam.classList.remove('btn-active');
+
+    // Show/hide error
+    showError(status.error);
+
+    if (status.connected && status.active_type) {
+      indicator.style.color = '#10b981';
+      indicator.textContent = '●';
+      
+      if (status.active_type === 'webcam') {
+        text.textContent = 'Webcam connected';
+        btnWebcam.classList.add('btn-active');
+        badge.textContent = 'Webcam active';
+        badge.className = 'card-badge badge-success';
+      } else {
+        text.textContent = `IP Camera connected (${status.rtsp_url})`;
+        btnIpCam.classList.add('btn-active');
+        badge.textContent = 'IP Camera active';
+        badge.className = 'card-badge badge-success';
+      }
+      btnStop.disabled = false;
+    } else {
+      indicator.style.color = status.error ? '#ef4444' : '#9ca3af';
+      indicator.textContent = '○';
+      text.textContent = status.error ? 'Connection failed' : 'No camera selected';
+      badge.textContent = 'Select camera first';
+      badge.className = 'card-badge badge-warning';
+      btnStop.disabled = true;
+    }
+  }
+
+  // Switch camera with confirmation
+  function switchCamera(type) {
+    if (isConnecting) return;
+    
+    const typeName = type === 'webcam' ? 'Webcam' : 'IP Camera';
+    
+    if (currentCamera && currentCamera !== type) {
+      const currentName = currentCamera === 'webcam' ? 'Webcam' : 'IP Camera';
+      showModal(
+        'Switch Camera?',
+        `This will stop the ${currentName} and switch to ${typeName}. Continue?`,
+        () => doSwitchCamera(type)
+      );
+    } else if (!currentCamera) {
+      doSwitchCamera(type);
+    } else {
+      showToast(`Already using ${typeName}`, true);
+    }
+  }
+
+  async function doSwitchCamera(type) {
+    const typeName = type === 'webcam' ? 'Webcam' : 'IP Camera';
+    
+    // Clear previous errors
+    showError(null);
+    
+    // Show connecting state
+    setButtonsLoading(true);
+    showToast(`Connecting to ${typeName}...`, true);
+    
+    // Update UI to show connecting
+    document.getElementById('statusIndicator').style.color = '#f59e0b';
+    document.getElementById('statusIndicator').textContent = '◐';
+    document.getElementById('statusText').textContent = `Connecting to ${typeName}...`;
+
+    try {
+      const res = await fetch('/admin/camera/switch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ type: type })
+      });
+      const data = await res.json();
+      
+      if (data.connected) {
+        showToast(`${typeName} connected successfully!`, true);
+        showError(null);
+      } else {
+        const errorMsg = data.error || data.message || `Failed to connect to ${typeName}`;
+        showToast(errorMsg, false);
+        showError(errorMsg);
+      }
+      
+      loadCameraStatus();
+    } catch (e) {
+      const errorMsg = `Network error: Unable to connect to ${typeName}`;
+      showToast(errorMsg, false);
+      showError(errorMsg);
+      loadCameraStatus();
+    } finally {
+      setButtonsLoading(false);
+    }
+  }
+
+  // Stop camera with confirmation
+  function stopCamera() {
+    if (isConnecting) return;
+    
+    if (!currentCamera) {
+      showToast('No camera is active', false);
+      return;
+    }
+
+    const currentName = currentCamera === 'webcam' ? 'Webcam' : 'IP Camera';
+    showModal(
+      'Stop Camera?',
+      `This will stop the ${currentName}. The live stream will be unavailable until you select a camera again.`,
+      doStopCamera
+    );
+  }
+
+  async function doStopCamera() {
+    setButtonsLoading(true);
+    showToast('Stopping camera...', true);
+    
+    try {
+      const res = await fetch('/admin/camera/stop', { method: 'POST' });
+      const data = await res.json();
+      
+      if (data.status === 'success') {
+        showToast('Camera stopped successfully', true);
+        showError(null);
+      } else {
+        showToast('Failed to stop camera', false);
+      }
+      
+      // Force UI update
+      currentCamera = null;
+      loadCameraStatus();
+    } catch (e) {
+      showToast('Error stopping camera', false);
+      loadCameraStatus();
+    } finally {
+      setButtonsLoading(false);
+    }
+  }
+
+  // Open stream
+  function openStream() {
+    if (!currentCamera) {
+      showToast('Please select a camera first', false);
+      return;
+    }
+    window.open('/stream', '_blank');
+  }
+
+  // Logout
   async function logout() {
     if (!confirm("Are you sure you want to logout?")) return;
+    
+    // Stop camera before logout
+    if (currentCamera) {
+      try {
+        await fetch('/admin/camera/stop', { method: 'POST' });
+      } catch (e) {
+        // Continue with logout even if stop fails
+      }
+    }
+    
     await fetch("/admin/logout", { method: "POST" });
     location.href = "/admin";
   }
@@ -69,6 +344,11 @@
       banner.style.display = 'block';
     };
   })();
+
+  // Initial load
+  loadCameraStatus();
+  // Refresh status every 5 seconds
+  setInterval(loadCameraStatus, 5000);
   </script>
 </body>
 </html>
