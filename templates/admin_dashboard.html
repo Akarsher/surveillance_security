@@ -118,8 +118,9 @@
     document.getElementById('confirmModal').style.display = 'flex';
     pendingAction = onConfirm;
     document.getElementById('modalConfirmBtn').onclick = () => {
+      const action = pendingAction;
       closeModal();
-      if (pendingAction) pendingAction();
+      if (action) action();
     };
   }
 
