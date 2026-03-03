@@ -3,6 +3,221 @@
 <head>
   <title>Admin Dashboard</title>
   <link rel="stylesheet" href="/static/admin.css">
+  <style>
+    /* Alert Settings Toggle */
+    .alert-settings {
+      display: flex;
+      gap: 24px;
+      margin: 16px 0;
+      padding: 12px;
+      background: rgba(0,0,0,0.2);
+      border-radius: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .toggle-label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .toggle-label input[type="checkbox"] {
+      display: none;
+    }
+
+    .toggle-slider {
+      width: 44px;
+      height: 24px;
+      background: #4b5563;
+      border-radius: 12px;
+      position: relative;
+      transition: background 0.3s;
+    }
+
+    .toggle-slider::after {
+      content: '';
+      position: absolute;
+      width: 18px;
+      height: 18px;
+      background: #fff;
+      border-radius: 50%;
+      top: 3px;
+      left: 3px;
+      transition: transform 0.3s;
+    }
+
+    .toggle-label input:checked + .toggle-slider {
+      background: #10b981;
+    }
+
+    .toggle-label input:checked + .toggle-slider::after {
+      transform: translateX(20px);
+    }
+
+    /* Alert Popup Modal */
+    .alert-popup {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.85);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 2000;
+      animation: fadeIn 0.3s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    .alert-popup-content {
+      background: linear-gradient(135deg, #1f1f2e 0%, #2d1f1f 100%);
+      border: 2px solid #ef4444;
+      border-radius: 16px;
+      max-width: 450px;
+      width: 90%;
+      box-shadow: 0 0 60px rgba(239, 68, 68, 0.4), 0 0 100px rgba(239, 68, 68, 0.2);
+      animation: popupSlide 0.4s ease;
+      overflow: hidden;
+    }
+
+    @keyframes popupSlide {
+      from {
+        transform: scale(0.8) translateY(-20px);
+        opacity: 0;
+      }
+      to {
+        transform: scale(1) translateY(0);
+        opacity: 1;
+      }
+    }
+
+    .alert-popup-header {
+      background: linear-gradient(135deg, #ef4444, #dc2626);
+      padding: 20px;
+      text-align: center;
+      animation: pulse-bg 1s infinite;
+    }
+
+    @keyframes pulse-bg {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.85; }
+    }
+
+    .alert-icon {
+      font-size: 3rem;
+      display: block;
+      margin-bottom: 8px;
+      animation: shake 0.5s infinite;
+    }
+
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-5px); }
+      75% { transform: translateX(5px); }
+    }
+
+    .alert-popup-header h2 {
+      margin: 0;
+      font-size: 1.5rem;
+      color: #fff;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    }
+
+    .alert-popup-body {
+      padding: 24px;
+      text-align: center;
+    }
+
+    .popup-reason {
+      font-size: 1.3rem;
+      color: #fca5a5;
+      margin-bottom: 20px;
+      font-weight: 600;
+    }
+
+    .popup-details {
+      display: flex;
+      justify-content: center;
+      gap: 24px;
+      margin-bottom: 20px;
+    }
+
+    .popup-stat {
+      text-align: center;
+    }
+
+    .stat-label {
+      display: block;
+      font-size: 0.85rem;
+      color: #9ca3af;
+      margin-bottom: 4px;
+    }
+
+    .stat-value {
+      display: block;
+      font-size: 2rem;
+      font-weight: bold;
+      color: #10b981;
+    }
+
+    .stat-danger {
+      color: #ef4444;
+    }
+
+    .stat-warning {
+      color: #f59e0b;
+    }
+
+    .popup-time {
+      color: #6b7280;
+      font-size: 0.9rem;
+      margin-bottom: 16px;
+    }
+
+    .alert-popup-footer {
+      padding: 16px 24px 24px;
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+    }
+
+    .alert-popup-footer .btn {
+      min-width: 140px;
+    }
+
+    /* Body shake on alert */
+    @keyframes bodyShake {
+      0%, 100% { transform: translateX(0); }
+      10%, 30%, 50%, 70%, 90% { transform: translateX(-2px); }
+      20%, 40%, 60%, 80% { transform: translateX(2px); }
+    }
+
+    .alert-shake {
+      animation: bodyShake 0.5s ease;
+    }
+
+    /* Alert banner with dismiss */
+    .alert-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .btn-small {
+      padding: 6px 12px;
+      font-size: 0.85rem;
+    }
+  </style>
 </head>
 <body>
   <div class="container">
@@ -38,6 +253,22 @@
           ⏹ Stop Camera
         </button>
       </div>
+
+      <!-- Alert Sound & Popup Settings -->
+      <div class="alert-settings">
+        <label class="toggle-label">
+          <input type="checkbox" id="alertSoundToggle" checked>
+          <span class="toggle-slider"></span>
+          🔊 Alert Sound
+        </label>
+        <label class="toggle-label">
+          <input type="checkbox" id="alertPopupToggle" checked>
+          <span class="toggle-slider"></span>
+          📢 Alert Popup
+        </label>
+        <button class="btn btn-small btn-secondary" onclick="testAlertSound()">🔔 Test Sound</button>
+      </div>
+
       <p class="camera-hint">
         <strong>Webcam:</strong> Built-in laptop camera<br>
         <strong>IP Camera:</strong> Tapo security camera (RTSP)
@@ -68,10 +299,44 @@
     <!-- Live alert banner -->
     <div id="alertBanner" class="alert-banner" style="display:none;">
       <strong>🚨 SECURITY ALERT:</strong> <span id="alertText"></span>
+      <button class="btn btn-small btn-secondary" onclick="dismissBanner()">Dismiss</button>
     </div>
   </div>
 
   <div id="toast" class="toast" style="display:none;"></div>
+
+  <!-- Alert Popup Modal -->
+  <div id="alertPopup" class="alert-popup" style="display:none;">
+    <div class="alert-popup-content">
+      <div class="alert-popup-header">
+        <span class="alert-icon">🚨</span>
+        <h2>SECURITY ALERT</h2>
+      </div>
+      <div class="alert-popup-body">
+        <p id="popupReason" class="popup-reason"></p>
+        <div class="popup-details">
+          <div class="popup-stat">
+            <span class="stat-label">Authorized</span>
+            <span class="stat-value" id="popupAuth">0</span>
+          </div>
+          <div class="popup-stat">
+            <span class="stat-label">Restricted</span>
+            <span class="stat-value stat-danger" id="popupRestr">0</span>
+          </div>
+          <div class="popup-stat">
+            <span class="stat-label">Unknown</span>
+            <span class="stat-value stat-warning" id="popupUnk">0</span>
+          </div>
+        </div>
+        <p class="popup-time" id="popupTime"></p>
+        <a id="popupSnapshot" href="#" target="_blank" class="btn btn-secondary">📸 View Snapshot</a>
+      </div>
+      <div class="alert-popup-footer">
+        <button class="btn btn-primary" onclick="dismissAlert()">✓ Acknowledge</button>
+        <button class="btn btn-danger" onclick="viewLogsFromAlert()">📋 View All Logs</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Confirmation Modal -->
   <div id="confirmModal" class="modal" style="display:none;">
@@ -85,12 +350,144 @@
     </div>
   </div>
 
+  <!-- Custom Alert Sound - Change the path to your audio file -->
+  <audio id="alertSound" preload="auto">
+    <source src="/static/audio/faaah.mp3" type="audio/mpeg">
+    <source src="/static/audio/alert.wav" type="audio/wav">
+    Your browser does not support audio.
+  </audio>
+
   <script>
+  // =============================
+  // ALERT SOUND & POPUP SETTINGS
+  // =============================
+  let alertSoundEnabled = true;
+  let alertPopupEnabled = true;
+
+  // Play custom audio alert
+  function playAlertSound() {
+    if (!alertSoundEnabled) return;
+    
+    try {
+      const audio = document.getElementById('alertSound');
+      audio.currentTime = 0;
+      audio.volume = 0.8;
+      audio.play().catch(e => {
+        console.log('Audio play failed, using fallback:', e);
+        playFallbackBeep();
+      });
+    } catch (e) {
+      console.log('Audio error:', e);
+      playFallbackBeep();
+    }
+  }
+
+  // Fallback beep using Web Audio API
+  function playFallbackBeep() {
+    try {
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      
+      // Play 3 beeps
+      playBeepTone(audioContext, 800, 0);
+      playBeepTone(audioContext, 600, 0.4);
+      playBeepTone(audioContext, 800, 0.8);
+    } catch (e) {
+      console.log('Web Audio not supported:', e);
+    }
+  }
+
+  function playBeepTone(audioContext, frequency, delay) {
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    oscillator.frequency.value = frequency;
+    oscillator.type = 'square';
+    
+    const startTime = audioContext.currentTime + delay;
+    gainNode.gain.setValueAtTime(0.3, startTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + 0.3);
+    
+    oscillator.start(startTime);
+    oscillator.stop(startTime + 0.3);
+  }
+
+  // Test sound button
+  function testAlertSound() {
+    if (!alertSoundEnabled) {
+      showToast('Alert sound is disabled. Enable it first.', false);
+      return;
+    }
+    playAlertSound();
+    showToast('Playing test alert sound...', true);
+  }
+
+  // Show alert popup
+  function showAlertPopup(data) {
+    if (!alertPopupEnabled) return;
+    
+    document.getElementById('popupReason').textContent = data.reason;
+    document.getElementById('popupAuth').textContent = data.authorized;
+    document.getElementById('popupRestr').textContent = data.restricted;
+    document.getElementById('popupUnk').textContent = data.unknown;
+    document.getElementById('popupTime').textContent = `Time: ${formatTime(data.time)}`;
+    
+    const snapshotLink = document.getElementById('popupSnapshot');
+    if (data.snapshot) {
+      snapshotLink.href = '/' + data.snapshot;
+      snapshotLink.style.display = 'inline-block';
+    } else {
+      snapshotLink.style.display = 'none';
+    }
+    
+    document.getElementById('alertPopup').style.display = 'flex';
+    
+    // Shake effect
+    document.body.classList.add('alert-shake');
+    setTimeout(() => document.body.classList.remove('alert-shake'), 500);
+  }
+
+  function formatTime(timeStr) {
+    if (timeStr && timeStr.includes('_')) {
+      const [date, time] = timeStr.split('_');
+      return `${date.slice(0,4)}-${date.slice(4,6)}-${date.slice(6,8)} ${time.slice(0,2)}:${time.slice(2,4)}:${time.slice(4,6)}`;
+    }
+    return timeStr || 'Unknown';
+  }
+
+  function dismissAlert() {
+    document.getElementById('alertPopup').style.display = 'none';
+  }
+
+  function dismissBanner() {
+    document.getElementById('alertBanner').style.display = 'none';
+  }
+
+  function viewLogsFromAlert() {
+    dismissAlert();
+    location.href = '/admin/logs';
+  }
+
+  // Toggle event listeners
+  document.getElementById('alertSoundToggle').addEventListener('change', function() {
+    alertSoundEnabled = this.checked;
+    showToast(this.checked ? 'Alert sound enabled' : 'Alert sound disabled', true);
+  });
+
+  document.getElementById('alertPopupToggle').addEventListener('change', function() {
+    alertPopupEnabled = this.checked;
+    showToast(this.checked ? 'Alert popup enabled' : 'Alert popup disabled', true);
+  });
+
+  // =============================
+  // EXISTING CAMERA & UI CODE
+  // =============================
   let currentCamera = null;
   let pendingAction = null;
   let isConnecting = false;
 
-  // Toast notification
   function showToast(msg, ok=true) {
     const t = document.getElementById('toast');
     t.textContent = msg;
@@ -99,7 +496,6 @@
     setTimeout(() => t.style.display = 'none', 4000);
   }
 
-  // Show/hide error
   function showError(message) {
     const errorDiv = document.getElementById('cameraError');
     const errorText = document.getElementById('errorText');
@@ -111,7 +507,6 @@
     }
   }
 
-  // Modal functions
   function showModal(title, message, onConfirm) {
     document.getElementById('modalTitle').textContent = title;
     document.getElementById('modalMessage').textContent = message;
@@ -129,7 +524,6 @@
     pendingAction = null;
   }
 
-  // Disable/enable buttons during operations
   function setButtonsLoading(loading) {
     const btns = ['btnWebcam', 'btnIpCam', 'btnStop'];
     btns.forEach(id => {
@@ -138,9 +532,8 @@
     isConnecting = loading;
   }
 
-  // Camera status
   async function loadCameraStatus() {
-    if (isConnecting) return; // Don't refresh while connecting
+    if (isConnecting) return;
     
     try {
       const res = await fetch('/admin/camera/status');
@@ -160,11 +553,8 @@
     const btnIpCam = document.getElementById('btnIpCam');
     const btnStop = document.getElementById('btnStop');
 
-    // Reset button states
     btnWebcam.classList.remove('btn-active');
     btnIpCam.classList.remove('btn-active');
-
-    // Show/hide error
     showError(status.error);
 
     if (status.connected && status.active_type) {
@@ -193,7 +583,6 @@
     }
   }
 
-  // Switch camera with confirmation
   function switchCamera(type) {
     if (isConnecting) return;
     
@@ -216,14 +605,10 @@
   async function doSwitchCamera(type) {
     const typeName = type === 'webcam' ? 'Webcam' : 'IP Camera';
     
-    // Clear previous errors
     showError(null);
-    
-    // Show connecting state
     setButtonsLoading(true);
     showToast(`Connecting to ${typeName}...`, true);
     
-    // Update UI to show connecting
     document.getElementById('statusIndicator').style.color = '#f59e0b';
     document.getElementById('statusIndicator').textContent = '◐';
     document.getElementById('statusText').textContent = `Connecting to ${typeName}...`;
@@ -256,7 +641,6 @@
     }
   }
 
-  // Stop camera with confirmation
   function stopCamera() {
     if (isConnecting) return;
     
@@ -288,7 +672,6 @@
         showToast('Failed to stop camera', false);
       }
       
-      // Force UI update
       currentCamera = null;
       loadCameraStatus();
     } catch (e) {
@@ -299,7 +682,6 @@
     }
   }
 
-  // Open stream
   function openStream() {
     if (!currentCamera) {
       showToast('Please select a camera first', false);
@@ -308,24 +690,22 @@
     window.open('/stream', '_blank');
   }
 
-  // Logout
   async function logout() {
     if (!confirm("Are you sure you want to logout?")) return;
     
-    // Stop camera before logout
     if (currentCamera) {
       try {
         await fetch('/admin/camera/stop', { method: 'POST' });
-      } catch (e) {
-        // Continue with logout even if stop fails
-      }
+      } catch (e) {}
     }
     
     await fetch("/admin/logout", { method: "POST" });
     location.href = "/admin";
   }
 
-  // WebSocket alerts
+  // =============================
+  // WEBSOCKET ALERTS
+  // =============================
   (function setupAlertsWS() {
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(`${scheme}://${location.host}/ws/alerts`);
@@ -341,14 +721,30 @@
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
+      
+      // Update banner
       text.textContent = `${data.reason} — Auth:${data.authorized} Restr:${data.restricted} Unk:${data.unknown}`;
-      banner.style.display = 'block';
+      banner.style.display = 'flex';
+      
+      // Play alert sound
+      playAlertSound();
+      
+      // Show popup
+      showAlertPopup(data);
+    };
+
+    ws.onerror = (err) => {
+      console.error('WebSocket error:', err);
+    };
+
+    ws.onclose = () => {
+      console.log('WebSocket closed, reconnecting in 5s...');
+      setTimeout(setupAlertsWS, 5000);
     };
   })();
 
   // Initial load
   loadCameraStatus();
-  // Refresh status every 5 seconds
   setInterval(loadCameraStatus, 5000);
   </script>
 </body>
