@@ -517,10 +517,19 @@ def root():
 
 @app.get("/stream")
 def stream():
+    """Raw MJPEG stream for embedding in img tags"""
     return StreamingResponse(
         generate_frames(),
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
+
+# Add a new route for the stream page with UI overlay
+@app.get("/stream/view", response_class=HTMLResponse)
+def stream_view():
+    """Stream page with security camera UI overlay"""
+    if not admin_logged_in:
+        return FileResponse("templates/admin_login.html")
+    return FileResponse("templates/stream.html")
 
 @app.websocket("/ws/alerts")
 async def websocket_alerts(websocket: WebSocket):

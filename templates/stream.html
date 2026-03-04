@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Live Security Feed</title>
+  <link rel="stylesheet" href="/static/admin.css">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #000;
+      color: #fff;
+      font-family: 'Consolas', 'Monaco', monospace;
+      overflow: hidden;
+      height: 100vh;
+    }
+
+    .stream-container {
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+    /* Top Control Bar */
+    .control-bar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      background: linear-gradient(180deg, rgba(0,0,0,0.8) 0%, transparent 100%);
+      padding: 12px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 100;
+    }
+
+    .control-bar h1 {
+      font-size: 1rem;
+      font-weight: normal;
+      color: #9ca3af;
+    }
+
+    .control-bar h1 span {
+      color: #10b981;
+    }
+
+    .control-buttons {
+      display: flex;
+      gap: 10px;
+    }
+
+    .control-btn {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #fff;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      transition: all 0.2s;
+    }
+
+    .control-btn:hover {
+      background: rgba(255,255,255,0.2);
+    }
+
+    .control-btn.btn-back {
+      background: rgba(59,130,246,0.3);
+      border-color: #3b82f6;
+    }
+
+    /* Stream Frame */
+    .stream-frame {
+      flex: 1;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      position: relative;
+    }
+
+    .stream-frame img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+
+    /* Security Camera Overlay */
+    .camera-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      pointer-events: none;
+      z-index: 50;
+    }
+
+    /* Top-left: Date/Time & Camera Info */
+    .overlay-topleft {
+      position: absolute;
+      top: 60px;
+      left: 20px;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.9), 0 0 10px rgba(0,0,0,0.5);
+    }
+
+    .datetime-display {
+      font-size: 1.4rem;
+      font-weight: bold;
+      color: #fff;
+      letter-spacing: 1px;
+    }
+
+    .date-part {
+      color: #f59e0b;
+    }
+
+    .time-part {
+      color: #fff;
+      margin-left: 12px;
+    }
+
+    .time-seconds {
+      color: #ef4444;
+      font-size: 1rem;
+    }
+
+    .camera-info {
+      margin-top: 8px;
+      font-size: 0.9rem;
+      color: #9ca3af;
+    }
+
+    .camera-name {
+      color: #10b981;
+      font-weight: bold;
+    }
+
+    /* Top-right: Recording indicator */
+    .overlay-topright {
+      position: absolute;
+      top: 60px;
+      right: 20px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.9);
+    }
+
+    .rec-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(239, 68, 68, 0.3);
+      padding: 6px 12px;
+      border-radius: 4px;
+      border: 1px solid #ef4444;
+    }
+
+    .rec-dot {
+      width: 10px;
+      height: 10px;
+      background: #ef4444;
+      border-radius: 50%;
+      animation: recBlink 1s infinite;
+    }
+
+    @keyframes recBlink {
+      0%, 50% { opacity: 1; }
+      51%, 100% { opacity: 0.3; }
+    }
+
+    .rec-text {
+      color: #ef4444;
+      font-weight: bold;
+      font-size: 0.9rem;
+      letter-spacing: 2px;
+    }
+
+    /* Bottom-left: System status */
+    .overlay-bottomleft {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.9);
+    }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      font-size: 0.85rem;
+      color: #9ca3af;
+    }
+
+    .status-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .status-dot.green { background: #10b981; }
+    .status-dot.yellow { background: #f59e0b; animation: pulse 2s infinite; }
+    .status-dot.red { background: #ef4444; animation: pulse 1s infinite; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    /* Bottom-right: Face detection info */
+    .overlay-bottomright {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      text-align: right;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.9);
+    }
+
+    .detection-info {
+      font-size: 0.85rem;
+      color: #9ca3af;
+    }
+
+    .detection-count {
+      font-size: 1.2rem;
+      font-weight: bold;
+    }
+
+    .detection-count.auth { color: #10b981; }
+    .detection-count.restr { color: #ef4444; }
+    .detection-count.unk { color: #f59e0b; }
+
+    /* Corner brackets for security camera look */
+    .corner-bracket {
+      position: absolute;
+      width: 40px;
+      height: 40px;
+      border: 2px solid rgba(255,255,255,0.3);
+    }
+
+    .corner-bracket.tl { top: 50px; left: 10px; border-right: none; border-bottom: none; }
+    .corner-bracket.tr { top: 50px; right: 10px; border-left: none; border-bottom: none; }
+    .corner-bracket.bl { bottom: 10px; left: 10px; border-right: none; border-top: none; }
+    .corner-bracket.br { bottom: 10px; right: 10px; border-left: none; border-top: none; }
+
+    /* Scan line effect (subtle) */
+    .scanline {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0, 0, 0, 0.03) 2px,
+        rgba(0, 0, 0, 0.03) 4px
+      );
+      pointer-events: none;
+    }
+
+    /* Alert overlay */
+    .alert-overlay {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(239, 68, 68, 0.9);
+      color: #fff;
+      padding: 16px 32px;
+      border-radius: 8px;
+      font-size: 1.2rem;
+      font-weight: bold;
+      text-align: center;
+      display: none;
+      animation: alertPulse 0.5s infinite;
+      z-index: 200;
+      border: 2px solid #fff;
+      box-shadow: 0 0 30px rgba(239, 68, 68, 0.8);
+    }
+
+    @keyframes alertPulse {
+      0%, 100% { transform: translate(-50%, -50%) scale(1); }
+      50% { transform: translate(-50%, -50%) scale(1.02); }
+    }
+
+    .alert-overlay .alert-reason {
+      font-size: 1rem;
+      margin-top: 8px;
+      opacity: 0.9;
+    }
+
+    /* Fullscreen button */
+    .fullscreen-btn {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      z-index: 150;
+      pointer-events: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="stream-container">
+    <!-- Top Control Bar -->
+    <div class="control-bar">
+      <h1>🔒 SECURITY SYSTEM — <span id="cameraLabel">CAM-01</span></h1>
+      <div class="control-buttons">
+        <button class="control-btn" onclick="toggleFullscreen()">⛶ Fullscreen</button>
+        <button class="control-btn btn-back" onclick="location.href='/admin'">← Dashboard</button>
+      </div>
+    </div>
+
+    <!-- Stream Frame -->
+    <div class="stream-frame">
+      <img id="streamImg" src="/stream" alt="Live Security Feed">
+
+      <!-- Security Camera Overlay -->
+      <div class="camera-overlay">
+        <!-- Corner brackets -->
+        <div class="corner-bracket tl"></div>
+        <div class="corner-bracket tr"></div>
+        <div class="corner-bracket bl"></div>
+        <div class="corner-bracket br"></div>
+
+        <!-- Scan lines -->
+        <div class="scanline"></div>
+
+        <!-- Top-left: Date/Time -->
+        <div class="overlay-topleft">
+          <div class="datetime-display">
+            <span class="date-part" id="dateDisplay">2026-03-04</span>
+            <span class="time-part" id="timeDisplay">14:30</span><span class="time-seconds" id="secondsDisplay">:45</span>
+          </div>
+          <div class="camera-info">
+            <span class="camera-name" id="cameraName">WEBCAM-01</span> | 
+            <span id="resolution">1920x1080</span> | 
+            <span id="fps">30 FPS</span>
+          </div>
+        </div>
+
+        <!-- Top-right: Recording indicator -->
+        <div class="overlay-topright">
+          <div class="rec-indicator">
+            <div class="rec-dot"></div>
+            <span class="rec-text">REC</span>
+          </div>
+        </div>
+
+        <!-- Bottom-left: System status -->
+        <div class="overlay-bottomleft">
+          <div class="status-row">
+            <div class="status-item">
+              <div class="status-dot green" id="connectionDot"></div>
+              <span id="connectionStatus">CONNECTED</span>
+            </div>
+            <div class="status-item">
+              <div class="status-dot green" id="recognitionDot"></div>
+              <span>FACE RECOGNITION: ACTIVE</span>
+            </div>
+            <div class="status-item">
+              <span id="uptimeDisplay">UPTIME: 00:00:00</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bottom-right: Detection info -->
+        <div class="overlay-bottomright">
+          <div class="detection-info">
+            <div>DETECTED: <span class="detection-count auth" id="authCount">0</span> AUTH | 
+            <span class="detection-count restr" id="restrCount">0</span> RESTR | 
+            <span class="detection-count unk" id="unkCount">0</span> UNK</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Alert Overlay -->
+      <div class="alert-overlay" id="alertOverlay">
+        🚨 SECURITY ALERT
+        <div class="alert-reason" id="alertReason"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Alert Sound -->
+  <audio id="alertSound" preload="auto">
+    <source src="/static/audio/siren.mp3" type="audio/mpeg">
+  </audio>
+
+  <script>
+  // =============================
+  // LIVE DATE/TIME DISPLAY
+  // =============================
+  function updateDateTime() {
+    const now = new Date();
+    
+    // Date: YYYY-MM-DD
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    document.getElementById('dateDisplay').textContent = `${year}-${month}-${day}`;
+    
+    // Time: HH:MM
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    document.getElementById('timeDisplay').textContent = `${hours}:${minutes}`;
+    
+    // Seconds: :SS
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    document.getElementById('secondsDisplay').textContent = `:${seconds}`;
+  }
+
+  // Update every second
+  updateDateTime();
+  setInterval(updateDateTime, 1000);
+
+  // =============================
+  // UPTIME COUNTER
+  // =============================
+  let startTime = Date.now();
+
+  function updateUptime() {
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const hours = String(Math.floor(elapsed / 3600)).padStart(2, '0');
+    const minutes = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
+    const seconds = String(elapsed % 60).padStart(2, '0');
+    document.getElementById('uptimeDisplay').textContent = `UPTIME: ${hours}:${minutes}:${seconds}`;
+  }
+
+  updateUptime();
+  setInterval(updateUptime, 1000);
+
+  // =============================
+  // CAMERA STATUS
+  // =============================
+  async function loadCameraInfo() {
+    try {
+      const res = await fetch('/admin/camera/status');
+      const data = await res.json();
+      
+      if (data.connected) {
+        if (data.active_type === 'webcam') {
+          document.getElementById('cameraLabel').textContent = 'WEBCAM-01';
+          document.getElementById('cameraName').textContent = 'WEBCAM-01';
+        } else {
+          document.getElementById('cameraLabel').textContent = 'IP-CAM-01';
+          document.getElementById('cameraName').textContent = 'TAPO-C200';
+        }
+        document.getElementById('connectionDot').className = 'status-dot green';
+        document.getElementById('connectionStatus').textContent = 'CONNECTED';
+      } else {
+        document.getElementById('connectionDot').className = 'status-dot red';
+        document.getElementById('connectionStatus').textContent = 'DISCONNECTED';
+      }
+    } catch (e) {
+      document.getElementById('connectionDot').className = 'status-dot red';
+      document.getElementById('connectionStatus').textContent = 'ERROR';
+    }
+  }
+
+  loadCameraInfo();
+  setInterval(loadCameraInfo, 5000);
+
+  // =============================
+  // FULLSCREEN TOGGLE
+  // =============================
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(err => {
+        console.log('Fullscreen error:', err);
+      });
+    } else {
+      document.exitFullscreen();
+    }
+  }
+
+  // =============================
+  // ALERT HANDLING
+  // =============================
+  let alertTimeout = null;
+
+  function showAlert(reason) {
+    const overlay = document.getElementById('alertOverlay');
+    document.getElementById('alertReason').textContent = reason;
+    overlay.style.display = 'block';
+    
+    // Play sound
+    try {
+      const audio = document.getElementById('alertSound');
+      audio.currentTime = 0;
+      audio.play().catch(e => console.log('Audio failed:', e));
+    } catch (e) {}
+    
+    // Auto-hide after 10 seconds
+    if (alertTimeout) clearTimeout(alertTimeout);
+    alertTimeout = setTimeout(() => {
+      overlay.style.display = 'none';
+    }, 10000);
+  }
+
+  // =============================
+  // WEBSOCKET FOR REAL-TIME ALERTS
+  // =============================
+  (function setupAlertsWS() {
+    const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(`${scheme}://${location.host}/ws/alerts`);
+
+    ws.onopen = () => {
+      ws.send('hello');
+      setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+      }, 30000);
+    };
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      
+      // Update detection counts
+      document.getElementById('authCount').textContent = data.authorized;
+      document.getElementById('restrCount').textContent = data.restricted;
+      document.getElementById('unkCount').textContent = data.unknown;
+      
+      // Show alert
+      showAlert(data.reason);
+    };
+
+    ws.onerror = (err) => {
+      console.error('WebSocket error:', err);
+      document.getElementById('recognitionDot').className = 'status-dot yellow';
+    };
+
+    ws.onclose = () => {
+      console.log('WebSocket closed, reconnecting in 5s...');
+      document.getElementById('recognitionDot').className = 'status-dot yellow';
+      setTimeout(setupAlertsWS, 5000);
+    };
+  })();
+
+  // =============================
+  // KEYBOARD SHORTCUTS
+  // =============================
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'f' || e.key === 'F') {
+      toggleFullscreen();
+    }
+    if (e.key === 'Escape' && document.getElementById('alertOverlay').style.display === 'block') {
+      document.getElementById('alertOverlay').style.display = 'none';
+    }
+  });
+  </script>
+</body>
+</html>
