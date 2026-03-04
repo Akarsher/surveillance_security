@@ -29,5 +29,14 @@ class Event(Base):
     snapshot_path = Column(String(512), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class Entry(Base):
+    """Log of correct/authorized entries"""
+    __tablename__ = "entries"
+    id = Column(Integer, primary_key=True)
+    time = Column(DateTime, default=datetime.utcnow, index=True)
+    count = Column(Integer, default=0)  # number of authorized people
+    names = Column(Text, nullable=False)  # comma-separated names
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 def init_db():
     Base.metadata.create_all(engine)

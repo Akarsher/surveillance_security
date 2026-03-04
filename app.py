@@ -14,7 +14,7 @@ from typing import Optional
 import threading
 from sqlalchemy import select, delete, update
 from sqlalchemy.exc import IntegrityError
-from db import SessionLocal, init_db, Person, Event
+from db import SessionLocal, init_db, Person, Event, Entry
 
 os.environ.setdefault("INSIGHTFACE_HOME", os.path.join(os.getcwd(), ".insightface"))
 
@@ -353,6 +353,23 @@ def log_event(reason, a, r, u, snapshot):
         s.commit()
 
 # =============================
+# ENTRY LOGGER (for correct access)
+# =============================
+def log_entry(count: int, names: list):
+    """Log a correct entry when exactly 1 authorized person is detected"""
+    names_str = ",".join(names)
+    with SessionLocal() as s:
+        s.add(Entry(
+            time=datetime.now(),
+            count=count,
+            names=names_str
+        ))
+        # Also prune old entries (older than 30 days)
+        cutoff = datetime.now() - timedelta(days=30)
+        s.execute(delete(Entry).where(Entry.time < cutoff))
+        s.commit()
+
+# =============================
 # MJPEG STREAM
 # =============================
 def generate_frames():
@@ -364,6 +381,7 @@ def generate_frames():
     a = r = u = 0
     last_reason = None
     consecutive_failures = 0
+    last_entry_logged = None  # Track last entry to avoid duplicate logs
 
     while camera.running:
         # Check if camera is active
@@ -423,12 +441,16 @@ def generate_frames():
             r = sum(1 for rr in last_roles if rr == "restricted")
             u = sum(1 for rr in last_roles if rr not in ("authorized", "restricted"))
 
+            # Get authorized names for entry logging
+            auth_names = [n for n, ro in zip(last_names, last_roles) if ro == "authorized"]
+
             # prioritize violations: restricted > unknown > authorized count
+            # CHANGED: Now requires exactly 1 authorized person (was 2)
             if r > 0:
                 reason = "Restricted person detected"
             elif u > 0:
                 reason = "Unknown person detected"
-            elif a != 2:
+            elif a != 1:
                 reason = f"Authorized count = {a}"
             else:
                 reason = ""
@@ -436,10 +458,19 @@ def generate_frames():
             # update debounce
             if reason:
                 violation_counter += 1
+                last_entry_logged = None  # Reset entry tracking on violation
             else:
                 violation_counter = 0
                 alert_active = False
                 last_reason = None
+                
+                # Log correct entry (exactly 1 authorized, no restricted/unknown)
+                # Only log if names changed (avoid duplicate entries)
+                current_entry_key = tuple(sorted(auth_names))
+                if current_entry_key and current_entry_key != last_entry_logged:
+                    log_entry(a, auth_names)
+                    last_entry_logged = current_entry_key
+                    print(f"[ENTRY] Logged: {auth_names}")
 
             # fire alert when:
             # - debounce reached AND
@@ -605,7 +636,72 @@ def admin_events_export(start: Optional[str] = Query(None), end: Optional[str] =
     headers = {"Content-Disposition": 'attachment; filename="events.csv"'}
     return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers=headers)
 
+@app.get("/admin/entries")
+def admin_entries(start: Optional[str] = Query(None), end: Optional[str] = Query(None)):
+    """Get entry log (correct authorized accesses)"""
+    def parse_date(s: Optional[str]):
+        try:
+            return datetime.strptime(s, "%Y-%m-%d") if s else None
+        except Exception:
+            return None
 
+    start_dt = parse_date(start)
+    end_dt = parse_date(end)
+    end_exclusive = end_dt + timedelta(days=1) if end_dt else None
+
+    items = []
+    with SessionLocal() as s:
+        stmt = select(Entry)
+        if start_dt:
+            stmt = stmt.where(Entry.time >= start_dt)
+        if end_exclusive:
+            stmt = stmt.where(Entry.time < end_exclusive)
+        stmt = stmt.order_by(Entry.time.desc())
+        entries = s.scalars(stmt).all()
+        for e in entries:
+            items.append({
+                "date": e.time.strftime("%Y-%m-%d"),
+                "time": e.time.strftime("%H:%M:%S"),
+                "count": e.count,
+                "names": e.names.split(",") if e.names else []
+            })
+    return JSONResponse(items)
+
+@app.get("/admin/entries/export")
+def admin_entries_export(start: Optional[str] = Query(None), end: Optional[str] = Query(None)):
+    """Export entry log as CSV"""
+    def parse_date(s: Optional[str]):
+        try:
+            return datetime.strptime(s, "%Y-%m-%d") if s else None
+        except Exception:
+            return None
+
+    start_dt = parse_date(start)
+    end_dt = parse_date(end)
+    end_exclusive = end_dt + timedelta(days=1) if end_dt else None
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Date", "Time", "Count", "Names"])
+
+    with SessionLocal() as s:
+        stmt = select(Entry)
+        if start_dt:
+            stmt = stmt.where(Entry.time >= start_dt)
+        if end_exclusive:
+            stmt = stmt.where(Entry.time < end_exclusive)
+        stmt = stmt.order_by(Entry.time.desc())
+        for e in s.scalars(stmt).all():
+            writer.writerow([
+                e.time.strftime("%Y-%m-%d"),
+                e.time.strftime("%H:%M:%S"),
+                e.count,
+                e.names
+            ])
+
+    output.seek(0)
+    headers = {"Content-Disposition": 'attachment; filename="entries.csv"'}
+    return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers=headers)
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin_dashboard():

@@ -3,6 +3,48 @@
 <head>
   <title>Security Logs</title>
   <link rel="stylesheet" href="/static/admin.css">
+  <style>
+    .tab-container {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .tab-btn {
+      padding: 10px 20px;
+      border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.05);
+      color: #9ca3af;
+      border-radius: 8px 8px 0 0;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .tab-btn:hover {
+      background: rgba(255,255,255,0.1);
+    }
+    .tab-btn.active {
+      background: rgba(59,130,246,0.2);
+      border-color: #3b82f6;
+      color: #60a5fa;
+    }
+    .tab-content {
+      display: none;
+    }
+    .tab-content.active {
+      display: block;
+    }
+    .names-cell {
+      max-width: 300px;
+    }
+    .name-tag {
+      display: inline-block;
+      background: rgba(16,185,129,0.2);
+      color: #10b981;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.85rem;
+      margin: 2px;
+    }
+  </style>
 </head>
 <body>
   <div class="container">
@@ -12,7 +54,7 @@
         <button class="btn btn-danger" onclick="logout()">🚪 Logout</button>
       </div>
       <h1>📋 Security Logs</h1>
-      <p class="subtitle">View and filter security event logs</p>
+      <p class="subtitle">View and filter security event logs and entry records</p>
     </header>
 
     <!-- Live alert banner -->
@@ -34,27 +76,58 @@
         </label>
         <button class="btn btn-primary" onclick="applyFilter()">Apply Filter</button>
         <button class="btn btn-secondary" onclick="clearFilter()">Clear</button>
-        <button class="btn btn-secondary" onclick="exportCSV()">📥 Export CSV</button>
       </div>
     </section>
 
-    <!-- Events Table -->
+    <!-- Tab Navigation -->
     <section class="section">
-      <h2>📊 Event History</h2>
-      <div class="table-container">
-        <table id="eventsTable" class="data-table">
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Reason</th>
-              <th>Authorized</th>
-              <th>Restricted</th>
-              <th>Unknown</th>
-              <th>Snapshot</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
+      <div class="tab-container">
+        <button class="tab-btn active" onclick="switchTab('violations')">🚨 Security Violations</button>
+        <button class="tab-btn" onclick="switchTab('entries')">✅ Entry Log</button>
+      </div>
+
+      <!-- Security Violations Tab -->
+      <div id="violations-tab" class="tab-content active">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h2 style="margin:0;">🚨 Security Violations</h2>
+          <button class="btn btn-secondary" onclick="exportViolationsCSV()">📥 Export CSV</button>
+        </div>
+        <div class="table-container">
+          <table id="eventsTable" class="data-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Reason</th>
+                <th>Authorized</th>
+                <th>Restricted</th>
+                <th>Unknown</th>
+                <th>Snapshot</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Entry Log Tab -->
+      <div id="entries-tab" class="tab-content">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h2 style="margin:0;">✅ Entry Log (Authorized Access)</h2>
+          <button class="btn btn-secondary" onclick="exportEntriesCSV()">📥 Export CSV</button>
+        </div>
+        <div class="table-container">
+          <table id="entriesTable" class="data-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Time</th>
+                <th>No. of People</th>
+                <th>Employee Names</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
     </section>
   </div>
@@ -62,6 +135,8 @@
   <div id="toast" class="toast" style="display:none;"></div>
 
   <script>
+  let currentTab = 'violations';
+
   async function logout() {
     if (!confirm("Are you sure you want to logout?")) return;
     await fetch("/admin/logout", { method: "POST" });
@@ -76,6 +151,18 @@
     setTimeout(() => t.style.display = 'none', 3000);
   }
 
+  function switchTab(tab) {
+    currentTab = tab;
+    
+    // Update tab buttons
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    event.target.classList.add('active');
+    
+    // Update tab content
+    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+    document.getElementById(`${tab}-tab`).classList.add('active');
+  }
+
   function getFilterQS() {
     const s = document.getElementById('startDate').value;
     const e = document.getElementById('endDate').value;
@@ -88,17 +175,24 @@
 
   function applyFilter() {
     loadEvents();
+    loadEntries();
   }
 
   function clearFilter() {
     document.getElementById('startDate').value = '';
     document.getElementById('endDate').value = '';
     loadEvents();
+    loadEntries();
   }
 
-  function exportCSV() {
+  function exportViolationsCSV() {
     const qs = getFilterQS();
     window.open(`/admin/events/export${qs}`, '_blank');
+  }
+
+  function exportEntriesCSV() {
+    const qs = getFilterQS();
+    window.open(`/admin/entries/export${qs}`, '_blank');
   }
 
   async function loadEvents() {
@@ -113,7 +207,7 @@
     tbody.innerHTML = '';
 
     if (data.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" class="empty-msg">No events found</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-msg">No security violations found</td></tr>';
       return;
     }
 
@@ -127,6 +221,35 @@
         <td class="count-cell">${e.restricted}</td>
         <td class="count-cell">${e.unknown}</td>
         <td>${e.snapshot ? `<a href="${href}" target="_blank" class="link">View</a>` : '-'}</td>
+      `;
+      tbody.appendChild(row);
+    });
+  }
+
+  async function loadEntries() {
+    const qs = getFilterQS();
+    const res = await fetch(`/admin/entries${qs}`);
+    if (!res.ok) {
+      showToast("Failed to load entry log", false);
+      return;
+    }
+    const data = await res.json();
+    const tbody = document.querySelector("#entriesTable tbody");
+    tbody.innerHTML = '';
+
+    if (data.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" class="empty-msg">No entries found</td></tr>';
+      return;
+    }
+
+    data.forEach(e => {
+      const row = document.createElement('tr');
+      const nameTags = e.names.map(n => `<span class="name-tag">${n}</span>`).join('');
+      row.innerHTML = `
+        <td>${e.date}</td>
+        <td>${e.time}</td>
+        <td class="count-cell">${e.count}</td>
+        <td class="names-cell">${nameTags || '-'}</td>
       `;
       tbody.appendChild(row);
     });
@@ -154,7 +277,10 @@
     };
   })();
 
+  // Initial load
   loadEvents();
+  loadEntries();
   </script>
 </body>
 </html>
+``` 
