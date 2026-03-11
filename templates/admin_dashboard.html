@@ -217,6 +217,56 @@
       padding: 6px 12px;
       font-size: 0.85rem;
     }
+
+    .tunnel-section {
+      background: linear-gradient(135deg, rgba(249,115,22,0.1), rgba(234,88,12,0.05));
+      border: 1px solid rgba(249,115,22,0.3);
+    }
+    .tunnel-card {
+      background: rgba(0,0,0,0.2);
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .tunnel-status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .tunnel-indicator {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 1.1rem;
+    }
+    .tunnel-dot { font-size: 1.5rem; }
+    .tunnel-dot.active { color: #10b981; }
+    .tunnel-dot.inactive { color: #6b7280; }
+    .tunnel-dot.starting { color: #f59e0b; animation: blink 1s infinite; }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .tunnel-url-box {
+      background: rgba(16,185,129,0.1);
+      border: 1px solid rgba(16,185,129,0.3);
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 16px;
+    }
+    .tunnel-url-box label {
+      display: block;
+      color: #10b981;
+      font-weight: 600;
+      margin-bottom: 10px;
+    }
+    .tunnel-url-row {
+      display: flex;
+      gap: 8px;
+    }
+    .tunnel-url-row input {
+      flex: 1;
+      font-family: monospace;
+      background: rgba(0,0,0,0.3);
+    }
   </style>
 </head>
 <body>
@@ -274,6 +324,109 @@
         <strong>IP Camera:</strong> Tapo security camera (RTSP)
       </p>
     </section>
+
+    <!-- Remote Access Section -->
+    <section class="section tunnel-section">
+      <h2>🌐 Remote Access</h2>
+      <p class="section-desc">Access your security system from anywhere</p>
+      
+      <div class="tunnel-card">
+        <div class="tunnel-status-row">
+          <div class="tunnel-indicator">
+            <span class="tunnel-dot" id="tunnelDot">●</span>
+            <span id="tunnelStatusText">Checking...</span>
+          </div>
+          <div class="tunnel-buttons">
+            <button class="btn btn-primary" id="tunnelStartBtn" onclick="startTunnel()">
+              🚀 Start Tunnel
+            </button>
+            <button class="btn btn-danger" id="tunnelStopBtn" onclick="stopTunnel()" style="display:none;">
+              ⏹️ Stop
+            </button>
+          </div>
+        </div>
+        
+        <div class="tunnel-url-box" id="tunnelUrlBox" style="display:none;">
+          <label>🔗 Public URL:</label>
+          <div class="tunnel-url-row">
+            <input type="text" id="tunnelUrlInput" class="input" readonly>
+            <button class="btn btn-secondary" onclick="copyTunnelUrl()">📋</button>
+            <button class="btn btn-secondary" onclick="openTunnelUrl()">🔗</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Remote Access Section -->
+    <section class="section tunnel-section">
+      <h2>🌐 Remote Access (Cloudflare Tunnel)</h2>
+      <p class="section-desc">Access your security system from anywhere - college, home, phone!</p>
+      
+      <div class="tunnel-card">
+        <!-- Status Display -->
+        <div class="tunnel-status-row">
+          <div class="tunnel-indicator">
+            <span class="tunnel-dot" id="tunnelDot">●</span>
+            <span id="tunnelStatusText">Checking tunnel status...</span>
+          </div>
+          <div class="tunnel-buttons">
+            <button class="btn btn-primary" id="tunnelStartBtn" onclick="startTunnel()">
+              🚀 Start Tunnel
+            </button>
+            <button class="btn btn-danger" id="tunnelStopBtn" onclick="stopTunnel()" style="display:none;">
+              ⏹️ Stop Tunnel
+            </button>
+          </div>
+        </div>
+        
+        <!-- URL Display (shown when tunnel is active) -->
+        <div class="tunnel-url-box" id="tunnelUrlBox" style="display:none;">
+          <label>🔗 Your Public URL (share this!):</label>
+          <div class="tunnel-url-row">
+            <input type="text" id="tunnelUrlInput" class="input tunnel-url-input" readonly>
+            <button class="btn btn-secondary" onclick="copyTunnelUrl()" title="Copy URL">
+              📋 Copy
+            </button>
+            <button class="btn btn-secondary" onclick="openTunnelUrl()" title="Open in new tab">
+              🔗 Open
+            </button>
+            <button class="btn btn-secondary" onclick="showQRCode()" title="Show QR Code">
+              📱 QR
+            </button>
+          </div>
+        </div>
+        
+        <!-- Info Box -->
+        <div class="tunnel-info-box">
+          <p>💡 <strong>How it works:</strong></p>
+          <ul>
+            <li>Click "Start Tunnel" to get a public URL</li>
+            <li>Share the URL to access from anywhere (college, phone, etc.)</li>
+            <li>URL changes when you restart - check here for the current one</li>
+            <li>Tunnel stops when you close this app</li>
+          </ul>
+        </div>
+        
+        <!-- URL History -->
+        <details class="tunnel-history">
+          <summary>📜 Recent URLs (last 5)</summary>
+          <ul id="tunnelHistoryList">
+            <li>Loading...</li>
+          </ul>
+        </details>
+      </div>
+    </section>
+
+    <!-- QR Code Modal -->
+    <div id="qrModal" class="modal" style="display:none;">
+      <div class="modal-content" style="text-align:center; max-width:350px;">
+        <h3>📱 Scan to Access</h3>
+        <p style="color:#9ca3af; font-size:0.9rem;">Scan with your phone camera</p>
+        <div id="qrCodeContainer" style="background:#fff; padding:20px; border-radius:8px; display:inline-block; margin:16px 0;"></div>
+        <p id="qrUrlText" style="color:#9ca3af; word-break:break-all; font-size:0.85rem;"></p>
+        <button class="btn btn-secondary" onclick="closeQRModal()">Close</button>
+      </div>
+    </div>
 
     <div class="dashboard-grid">
       <div class="card" onclick="location.href='/admin/employees'">
@@ -356,6 +509,8 @@
     <source src="/static/audio/alert.wav" type="audio/wav">
     Your browser does not support audio.
   </audio>
+
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 
   <script>
   // =============================
@@ -742,6 +897,205 @@
       setTimeout(setupAlertsWS, 5000);
     };
   })();
+
+  // =============================
+  // TUNNEL MANAGEMENT
+  // =============================
+
+  let tunnelCheckInterval = null;
+
+  async function loadTunnelStatus() {
+    try {
+      const res = await fetch('/admin/tunnel/status');
+      const data = await res.json();
+      updateTunnelUI(data);
+    } catch (e) {
+      console.error('Failed to load tunnel status:', e);
+      updateTunnelUI({ running: false, error: 'Failed to check status' });
+    }
+  }
+
+  function updateTunnelUI(status) {
+    const dot = document.getElementById('tunnelDot');
+    const text = document.getElementById('tunnelStatusText');
+    const startBtn = document.getElementById('tunnelStartBtn');
+    const stopBtn = document.getElementById('tunnelStopBtn');
+    const urlBox = document.getElementById('tunnelUrlBox');
+    const urlInput = document.getElementById('tunnelUrlInput');
+    
+    if (status.running && status.public_url) {
+      // Tunnel is active
+      dot.className = 'tunnel-dot active';
+      text.textContent = 'Tunnel active - Accessible from anywhere!';
+      text.style.color = '#10b981';
+      startBtn.style.display = 'none';
+      stopBtn.style.display = 'inline-flex';
+      urlBox.style.display = 'block';
+      urlInput.value = status.public_url;
+      
+    } else if (status.running && !status.public_url) {
+      // Tunnel is starting
+      dot.className = 'tunnel-dot starting';
+      text.textContent = 'Tunnel starting...';
+      text.style.color = '#f59e0b';
+      startBtn.style.display = 'none';
+      stopBtn.style.display = 'none';
+      urlBox.style.display = 'none';
+      
+    } else if (status.error) {
+      // Error state
+      dot.className = 'tunnel-dot error';
+      text.textContent = 'Error: ' + status.error;
+      text.style.color = '#ef4444';
+      startBtn.style.display = 'inline-flex';
+      stopBtn.style.display = 'none';
+      urlBox.style.display = 'none';
+      
+    } else {
+      // Tunnel not running
+      dot.className = 'tunnel-dot inactive';
+      text.textContent = 'Tunnel not running (local access only)';
+      text.style.color = '#9ca3af';
+      startBtn.style.display = 'inline-flex';
+      stopBtn.style.display = 'none';
+      urlBox.style.display = 'none';
+    }
+  }
+
+  async function startTunnel() {
+    const startBtn = document.getElementById('tunnelStartBtn');
+    const dot = document.getElementById('tunnelDot');
+    const text = document.getElementById('tunnelStatusText');
+    
+    startBtn.disabled = true;
+    startBtn.textContent = '⏳ Starting...';
+    dot.className = 'tunnel-dot starting';
+    text.textContent = 'Starting tunnel (this may take 10-20 seconds)...';
+    text.style.color = '#f59e0b';
+    
+    try {
+      const res = await fetch('/admin/tunnel/start', { method: 'POST' });
+      const data = await res.json();
+      
+      if (data.status === 'started' || data.status === 'already_running') {
+        showToast('🌐 Tunnel started! URL: ' + data.url, true);
+        loadTunnelHistory();
+      } else {
+        showToast('❌ Failed to start tunnel: ' + (data.error || 'Unknown error'), false);
+      }
+    } catch (e) {
+      showToast('❌ Error starting tunnel: ' + e.message, false);
+    }
+    
+    startBtn.disabled = false;
+    startBtn.textContent = '🚀 Start Tunnel';
+    loadTunnelStatus();
+  }
+
+  async function stopTunnel() {
+    if (!confirm('Stop the tunnel? Remote access will be disabled until you start it again.')) {
+      return;
+    }
+    
+    const stopBtn = document.getElementById('tunnelStopBtn');
+    stopBtn.disabled = true;
+    stopBtn.textContent = '⏳ Stopping...';
+    
+    try {
+      await fetch('/admin/tunnel/stop', { method: 'POST' });
+      showToast('✅ Tunnel stopped', true);
+    } catch (e) {
+      showToast('❌ Error stopping tunnel', false);
+    }
+    
+    stopBtn.disabled = false;
+    stopBtn.textContent = '⏹️ Stop Tunnel';
+    loadTunnelStatus();
+  }
+
+  function copyTunnelUrl() {
+    const url = document.getElementById('tunnelUrlInput').value;
+    if (!url) return;
+    
+    navigator.clipboard.writeText(url).then(() => {
+      showToast('📋 URL copied to clipboard!', true);
+    }).catch(() => {
+      // Fallback for older browsers
+      const input = document.getElementById('tunnelUrlInput');
+      input.select();
+      document.execCommand('copy');
+      showToast('📋 URL copied!', true);
+    });
+  }
+
+  function openTunnelUrl() {
+    const url = document.getElementById('tunnelUrlInput').value;
+    if (url) {
+      window.open(url, '_blank');
+    }
+  }
+
+  function showQRCode() {
+    const url = document.getElementById('tunnelUrlInput').value;
+    if (!url) return;
+    
+    const container = document.getElementById('qrCodeContainer');
+    container.innerHTML = '';
+    
+    // Generate QR code
+    QRCode.toCanvas(document.createElement('canvas'), url, {
+      width: 200,
+      margin: 2,
+      color: { dark: '#000000', light: '#ffffff' }
+    }, (err, canvas) => {
+      if (err) {
+        console.error(err);
+        container.innerHTML = '<p style="color:red;">Failed to generate QR code</p>';
+        return;
+      }
+      container.appendChild(canvas);
+    });
+    
+    document.getElementById('qrUrlText').textContent = url;
+    document.getElementById('qrModal').style.display = 'flex';
+  }
+
+  function closeQRModal() {
+    document.getElementById('qrModal').style.display = 'none';
+  }
+
+  async function loadTunnelHistory() {
+    try {
+      const res = await fetch('/admin/tunnel/history');
+      const history = await res.json();
+      
+      const list = document.getElementById('tunnelHistoryList');
+      
+      if (!history || history.length === 0) {
+        list.innerHTML = '<li style="color:#6b7280;">No previous URLs</li>';
+        return;
+      }
+      
+      list.innerHTML = history.slice(0, 5).map(item => {
+        const date = new Date(item.created_at);
+        const timeStr = date.toLocaleString();
+        return `<li>
+          <a href="${item.url}" target="_blank">${item.url}</a>
+          <span class="history-time"> — ${timeStr}</span>
+        </li>`;
+      }).join('');
+      
+    } catch (e) {
+      console.error('Failed to load tunnel history:', e);
+    }
+  }
+
+  // Load tunnel status on page load
+  loadTunnelStatus();
+  loadTunnelHistory();
+
+  // Check tunnel status every 5 seconds
+  tunnelCheckInterval = setInterval(loadTunnelStatus, 5000);
 
   // Initial load
   loadCameraStatus();

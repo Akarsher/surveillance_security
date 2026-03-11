@@ -15,6 +15,7 @@ import threading
 from sqlalchemy import select, delete, update
 from sqlalchemy.exc import IntegrityError
 from db import SessionLocal, init_db, Person, Event, Entry
+from cloudflare_tunnel import cf_tunnel
 
 os.environ.setdefault("INSIGHTFACE_HOME", os.path.join(os.getcwd(), ".insightface"))
 
@@ -955,3 +956,80 @@ def camera_stop():
         "message": "Camera stopped",
         "connected": False
     }
+
+# =============================
+# CLOUDFLARE TUNNEL ENDPOINTS
+# =============================
+
+@app.get("/admin/tunnel/status")
+def tunnel_status():
+    """Get current tunnel status"""
+    return JSONResponse(cf_tunnel.get_status())
+
+@app.post("/admin/tunnel/start")
+def start_tunnel():
+    """Start Cloudflare tunnel"""
+    if cf_tunnel.running:
+        return JSONResponse({
+            "status": "already_running",
+            "url": cf_tunnel.public_url
+        })
+    
+    url = cf_tunnel.start(port=8000)
+    
+    if url:
+        return JSONResponse({
+            "status": "started",
+            "url": url
+        })
+    else:
+        return JSONResponse({
+            "status": "failed",
+            "error": cf_tunnel.error or "Could not start tunnel"
+        }, status_code=500)
+
+@app.post("/admin/tunnel/stop")
+def stop_tunnel():
+    """Stop Cloudflare tunnel"""
+    cf_tunnel.stop()
+    return JSONResponse({"status": "stopped"})
+
+@app.get("/admin/tunnel/history")
+def tunnel_history():
+    """Get URL history"""
+    return JSONResponse(cf_tunnel.get_url_history())
+
+if __name__ == "__main__":
+    import uvicorn
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Security Camera System")
+    parser.add_argument("--tunnel", action="store_true", help="Start with Cloudflare tunnel enabled")
+    parser.add_argument("--port", type=int, default=8000, help="Port to run on")
+    args = parser.parse_args()
+    
+    print("")
+    print("=" * 50)
+    print("🔐 SECURITY CAMERA SYSTEM")
+    print("=" * 50)
+    
+    # Start tunnel if requested
+    if args.tunnel:
+        print("")
+        print("🚀 Starting with Cloudflare tunnel...")
+        cf_tunnel.start(args.port)
+    else:
+        print("")
+        print(f"📍 Running locally: http://localhost:{args.port}")
+        print("💡 Tip: Run with --tunnel flag to enable remote access")
+        print("   Example: python app.py --tunnel")
+    
+    print("")
+    
+    try:
+        uvicorn.run(app, host="0.0.0.0", port=args.port)
+    except KeyboardInterrupt:
+        print("\n👋 Shutting down...")
+    finally:
+        if cf_tunnel.running:
+            cf_tunnel.stop()
