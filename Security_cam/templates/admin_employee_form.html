@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Employee Form</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <div class="container">
+        <h2>{{ title }}</h2>
+        <form action="{{ url }}" method="post" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="username">Username:</label>
+                <input type="text" id="username" name="username" required value="{{ employee.username }}">
+            </div>
+            <div class="form-group">
+                <label for="emp_id">Employee ID:</label>
+                <input type="text" id="emp_id" name="emp_id" required value="{{ employee.emp_id }}">
+            </div>
+            <div class="form-group">
+                <label for="password">Password:</label>
+                <input type="password" id="password" name="password" {% if not employee.id %}required{% endif %}>
+            </div>
+            <div class="form-group">
+                <label for="mobile">Mobile Number:</label>
+                <input type="tel" id="mobile" name="mobile" required value="{{ employee.mobile }}">
+            </div>
+            <div class="form-group">
+                <label for="authorization">Authorization:</label>
+                <select id="authorization" name="authorization" required>
+                    <option value="authorized" {% if employee.authorization == 'authorized' %}selected{% endif %}>Authorized</option>
+                    <option value="restricted" {% if employee.authorization == 'restricted' %}selected{% endif %}>Restricted</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="role">Role:</label>
+                <input type="text" id="role" name="role" required value="{{ employee.role }}">
+            </div>
+            <div class="form-group">
+                <label for="photo">Photo:</label>
+                <input type="file" id="photo" name="photo" accept="image/*">
+            </div>
+            <button type="submit">Submit</button>
+            <a href="/admin/employees" class="cancel-button">Cancel</a>
+        </form>
+    </div>
+    <script src="/static/js/admin.js"></script>
+</body>
+</html>

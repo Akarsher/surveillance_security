@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+sqlalchemy
+pydantic
+opencv-python
+numpy
+anyio
+python-multipart
+shutil
+cloudflare
+onnxruntime
+insightface
+aiofiles
+python-dotenv

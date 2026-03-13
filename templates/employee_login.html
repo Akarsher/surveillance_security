@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Employee Login</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+
+    .login-container {
+      background: rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 20px;
+      padding: 40px;
+      width: 100%;
+      max-width: 420px;
+      box-shadow: 0 25px 50px rgba(0, 0, 0, 0.3);
+    }
+
+    .login-header {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .login-header .icon {
+      font-size: 4rem;
+      margin-bottom: 10px;
+    }
+
+    .login-header h1 {
+      color: #fff;
+      font-size: 1.8rem;
+      margin-bottom: 8px;
+    }
+
+    .login-header p {
+      color: #9ca3af;
+      font-size: 0.95rem;
+    }
+
+    .login-tabs {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 25px;
+    }
+
+    .tab-btn {
+      flex: 1;
+      padding: 12px;
+      border: none;
+      background: rgba(255, 255, 255, 0.1);
+      color: #9ca3af;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 0.95rem;
+      transition: all 0.3s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .tab-btn:hover {
+      background: rgba(255, 255, 255, 0.15);
+    }
+
+    .tab-btn.active {
+      background: linear-gradient(135deg, #3b82f6, #2563eb);
+      color: #fff;
+    }
+
+    .login-form {
+      display: none;
+    }
+
+    .login-form.active {
+      display: block;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-group label {
+      display: block;
+      color: #9ca3af;
+      margin-bottom: 8px;
+      font-size: 0.9rem;
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 14px 16px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 10px;
+      color: #fff;
+      font-size: 1rem;
+      transition: all 0.3s;
+    }
+
+    .form-group input:focus {
+      outline: none;
+      border-color: #3b82f6;
+      background: rgba(0, 0, 0, 0.4);
+    }
+
+    .form-group input::placeholder {
+      color: #6b7280;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: #fff;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 20px rgba(16, 185, 129, 0.3);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* Face Login Section */
+    .face-login-section {
+      text-align: center;
+    }
+
+    .camera-preview {
+      width: 100%;
+      max-width: 300px;
+      height: 225px;
+      background: #000;
+      border-radius: 12px;
+      margin: 0 auto 20px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .camera-preview video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .camera-preview canvas {
+      display: none;
+    }
+
+    .camera-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: rgba(0, 0, 0, 0.7);
+      color: #fff;
+      font-size: 0.9rem;
+    }
+
+    .camera-overlay.hidden {
+      display: none;
+    }
+
+    .face-guide {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 150px;
+      height: 180px;
+      border: 3px dashed rgba(59, 130, 246, 0.5);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+
+    .face-instructions {
+      color: #9ca3af;
+      font-size: 0.9rem;
+      margin-bottom: 20px;
+    }
+
+    .capture-btn {
+      background: linear-gradient(135deg, #3b82f6, #2563eb);
+    }
+
+    .capture-btn:hover {
+      box-shadow: 0 10px 20px rgba(59, 130, 246, 0.3);
+    }
+
+    /* Error/Success Messages */
+    .message {
+      padding: 12px 16px;
+      border-radius: 10px;
+      margin-bottom: 20px;
+      font-size: 0.9rem;
+      display: none;
+    }
+
+    .message.error {
+      background: rgba(239, 68, 68, 0.2);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #fca5a5;
+      display: block;
+    }
+
+    .message.success {
+      background: rgba(16, 185, 129, 0.2);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: #6ee7b7;
+      display: block;
+    }
+
+    /* Admin link */
+    .admin-link {
+      text-align: center;
+      margin-top: 25px;
+      padding-top: 20px;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .admin-link a {
+      color: #6b7280;
+      text-decoration: none;
+      font-size: 0.85rem;
+      transition: color 0.3s;
+    }
+
+    .admin-link a:hover {
+      color: #9ca3af;
+    }
+
+    /* Loading spinner */
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Responsive */
+    @media (max-width: 480px) {
+      .login-container {
+        padding: 30px 20px;
+      }
+
+      .login-header h1 {
+        font-size: 1.5rem;
+      }
+
+      .camera-preview {
+        height: 200px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="login-container">
+    <div class="login-header">
+      <div class="icon">👤</div>
+      <h1>Employee Portal</h1>
+      <p>Login to view your attendance records</p>
+    </div>
+
+    <!-- Login Tabs -->
+    <div class="login-tabs">
+      <button class="tab-btn active" onclick="showTab('pin')">
+        🔢 ID + PIN
+      </button>
+      <button class="tab-btn" onclick="showTab('face')">
+        📷 Face Login
+      </button>
+    </div>
+
+    <!-- Message Display -->
+    <div id="message" class="message"></div>
+
+    <!-- PIN Login Form -->
+    <form id="pinForm" class="login-form active" onsubmit="loginWithPin(event)">
+      <div class="form-group">
+        <label for="employeeId">Employee ID</label>
+        <input type="text" id="employeeId" placeholder="Enter your Employee ID" required autocomplete="username">
+      </div>
+      <div class="form-group">
+        <label for="pin">PIN</label>
+        <input type="password" id="pin" placeholder="Enter your PIN" required autocomplete="current-password" inputmode="numeric">
+      </div>
+      <button type="submit" class="btn btn-primary" id="pinLoginBtn">
+        🔓 Login
+      </button>
+    </form>
+
+    <!-- Face Login Form -->
+    <div id="faceForm" class="login-form">
+      <div class="face-login-section">
+        <div class="camera-preview">
+          <video id="video" autoplay playsinline></video>
+          <canvas id="canvas"></canvas>
+          <div class="face-guide"></div>
+          <div class="camera-overlay" id="cameraOverlay">
+            <span>📷 Click "Start Camera" to begin</span>
+          </div>
+        </div>
+        <p class="face-instructions">
+          Position your face within the circle and click capture
+        </p>
+        <button type="button" class="btn btn-primary" id="cameraBtn" onclick="toggleCamera()">
+          📷 Start Camera
+        </button>
+        <button type="button" class="btn btn-primary capture-btn" id="captureBtn" onclick="captureAndLogin()" style="display:none; margin-top:10px;">
+          ✨ Capture & Login
+        </button>
+      </div>
+    </div>
+
+    <div class="admin-link">
+      <a href="/admin">🔐 Admin Login</a>
+    </div>
+  </div>
+
+  <script>
+    let currentTab = 'pin';
+    let stream = null;
+    let cameraActive = false;
+
+    function showTab(tab) {
+      currentTab = tab;
+      
+      // Update tab buttons
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      event.target.classList.add('active');
+      
+      // Show/hide forms
+      document.getElementById('pinForm').classList.toggle('active', tab === 'pin');
+      document.getElementById('faceForm').classList.toggle('active', tab === 'face');
+      
+      // Stop camera if switching away from face tab
+      if (tab !== 'face' && cameraActive) {
+        stopCamera();
+      }
+      
+      // Clear messages
+      hideMessage();
+    }
+
+    function showMessage(text, isError = true) {
+      const msg = document.getElementById('message');
+      msg.textContent = text;
+      msg.className = isError ? 'message error' : 'message success';
+    }
+
+    function hideMessage() {
+      document.getElementById('message').className = 'message';
+    }
+
+    // PIN Login
+    async function loginWithPin(e) {
+      e.preventDefault();
+      
+      const btn = document.getElementById('pinLoginBtn');
+      const employeeId = document.getElementById('employeeId').value.trim();
+      const pin = document.getElementById('pin').value;
+      
+      if (!employeeId || !pin) {
+        showMessage('Please enter both Employee ID and PIN');
+        return;
+      }
+      
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Logging in...';
+      hideMessage();
+      
+      try {
+        const formData = new FormData();
+        formData.append('employee_id', employeeId);
+        formData.append('pin', pin);
+        
+        const res = await fetch('/employee/login', {
+          method: 'POST',
+          body: formData
+        });
+        
+        const data = await res.json();
+        
+        if (res.ok) {
+          showMessage(`Welcome, ${data.name}!`, false);
+          setTimeout(() => {
+            window.location.href = '/employee/dashboard';
+          }, 1000);
+        } else {
+          showMessage(data.detail || 'Login failed');
+        }
+      } catch (e) {
+        showMessage('Network error. Please try again.');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '🔓 Login';
+      }
+    }
+
+    // Camera functions
+    async function toggleCamera() {
+      if (cameraActive) {
+        stopCamera();
+      } else {
+        await startCamera();
+      }
+    }
+
+    async function startCamera() {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: 640, height: 480 }
+        });
+        
+        const video = document.getElementById('video');
+        video.srcObject = stream;
+        
+        document.getElementById('cameraOverlay').classList.add('hidden');
+        document.getElementById('cameraBtn').textContent = '⏹️ Stop Camera';
+        document.getElementById('captureBtn').style.display = 'block';
+        
+        cameraActive = true;
+      } catch (e) {
+        console.error('Camera error:', e);
+        showMessage('Could not access camera. Please check permissions.');
+      }
+    }
+
+    function stopCamera() {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        stream = null;
+      }
+      
+      document.getElementById('video').srcObject = null;
+      document.getElementById('cameraOverlay').classList.remove('hidden');
+      document.getElementById('cameraBtn').textContent = '📷 Start Camera';
+      document.getElementById('captureBtn').style.display = 'none';
+      
+      cameraActive = false;
+    }
+
+    async function captureAndLogin() {
+      const video = document.getElementById('video');
+      const canvas = document.getElementById('canvas');
+      const captureBtn = document.getElementById('captureBtn');
+      
+      // Set canvas size
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      
+      // Draw frame to canvas
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0);
+      
+      // Convert to blob
+      captureBtn.disabled = true;
+      captureBtn.innerHTML = '<span class="spinner"></span> Recognizing...';
+      hideMessage();
+      
+      try {
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+        
+        const formData = new FormData();
+        formData.append('image', blob, 'face.jpg');
+        
+        const res = await fetch('/employee/login/face', {
+          method: 'POST',
+          body: formData
+        });
+        
+        const data = await res.json();
+        
+        if (res.ok) {
+          showMessage(`Welcome, ${data.name}! (${data.confidence}% match)`, false);
+          stopCamera();
+          setTimeout(() => {
+            window.location.href = '/employee/dashboard';
+          }, 1500);
+        } else {
+          showMessage(data.detail || 'Face not recognized');
+        }
+      } catch (e) {
+        showMessage('Recognition failed. Please try again.');
+      } finally {
+        captureBtn.disabled = false;
+        captureBtn.innerHTML = '✨ Capture & Login';
+      }
+    }
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', () => {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Employee Dashboard</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      min-height: 100vh;
+      color: #fff;
+    }
+
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    /* Header */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      margin-bottom: 30px;
+      flex-wrap: wrap;
+      gap: 15px;
+    }
+
+    .user-info {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+    }
+
+    .user-avatar {
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #3b82f6, #2563eb);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      overflow: hidden;
+    }
+
+    .user-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .user-details h1 {
+      font-size: 1.3rem;
+      margin-bottom: 4px;
+    }
+
+    .user-details p {
+      color: #9ca3af;
+      font-size: 0.9rem;
+    }
+
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: all 0.3s;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-danger {
+      background: linear-gradient(135deg, #ef4444, #dc2626);
+      color: #fff;
+    }
+
+    .btn-danger:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(239, 68, 68, 0.3);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #3b82f6, #2563eb);
+      color: #fff;
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    /* Stats Cards */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+
+    .stat-card {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 20px;
+      text-align: center;
+    }
+
+    .stat-card .icon {
+      font-size: 2rem;
+      margin-bottom: 10px;
+    }
+
+    .stat-card .value {
+      font-size: 2rem;
+      font-weight: bold;
+      color: #10b981;
+      margin-bottom: 5px;
+    }
+
+    .stat-card .label {
+      color: #9ca3af;
+      font-size: 0.9rem;
+    }
+
+    .stat-card.highlight {
+      background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(16, 185, 129, 0.05));
+      border-color: rgba(16, 185, 129, 0.3);
+    }
+
+    /* Section */
+    .section {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 25px;
+      margin-bottom: 25px;
+    }
+
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      gap: 15px;
+    }
+
+    .section-header h2 {
+      font-size: 1.3rem;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* Search/Filter */
+    .filter-row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .input {
+      padding: 10px 14px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      color: #fff;
+      font-size: 0.95rem;
+    }
+
+    .input:focus {
+      outline: none;
+      border-color: #3b82f6;
+    }
+
+    /* Entries Table */
+    .entries-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .entries-table th,
+    .entries-table td {
+      padding: 14px 12px;
+      text-align: left;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .entries-table th {
+      color: #9ca3af;
+      font-weight: 600;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .entries-table tr:hover {
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .entry-time {
+      font-family: 'Consolas', monospace;
+      color: #10b981;
+      font-weight: 600;
+    }
+
+    .entry-date {
+      color: #9ca3af;
+    }
+
+    .snapshot-thumb {
+      width: 50px;
+      height: 50px;
+      border-radius: 6px;
+      object-fit: cover;
+      cursor: pointer;
+      transition: transform 0.3s;
+    }
+
+    .snapshot-thumb:hover {
+      transform: scale(1.1);
+    }
+
+    .no-snapshot {
+      color: #6b7280;
+      font-style: italic;
+    }
+
+    .confidence-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+
+    .confidence-high {
+      background: rgba(16, 185, 129, 0.2);
+      color: #10b981;
+    }
+
+    .confidence-medium {
+      background: rgba(245, 158, 11, 0.2);
+      color: #f59e0b;
+    }
+
+    /* Empty State */
+    .empty-state {
+      text-align: center;
+      padding: 40px;
+      color: #6b7280;
+    }
+
+    .empty-state .icon {
+      font-size: 3rem;
+      margin-bottom: 15px;
+      opacity: 0.5;
+    }
+
+    /* Today Card */
+    .today-card {
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(59, 130, 246, 0.05));
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      border-radius: 12px;
+      padding: 25px;
+      margin-bottom: 25px;
+    }
+
+    .today-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+
+    .today-header h2 {
+      font-size: 1.3rem;
+    }
+
+    .today-date {
+      color: #9ca3af;
+      font-size: 0.95rem;
+    }
+
+    .today-stats {
+      display: flex;
+      gap: 30px;
+      flex-wrap: wrap;
+    }
+
+    .today-stat {
+      text-align: center;
+    }
+
+    .today-stat .label {
+      color: #9ca3af;
+      font-size: 0.85rem;
+      margin-bottom: 5px;
+    }
+
+    .today-stat .value {
+      font-size: 1.5rem;
+      font-weight: bold;
+      color: #3b82f6;
+    }
+
+    .today-stat .value.success {
+      color: #10b981;
+    }
+
+    /* Modal */
+    .modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.8);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+      padding: 20px;
+    }
+
+    .modal-content {
+      background: #1f2937;
+      border-radius: 12px;
+      max-width: 500px;
+      width: 100%;
+      max-height: 90vh;
+      overflow: auto;
+    }
+
+    .modal-header {
+      padding: 20px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .modal-body {
+      padding: 20px;
+    }
+
+    .modal-body img {
+      width: 100%;
+      border-radius: 8px;
+    }
+
+    .close-btn {
+      background: none;
+      border: none;
+      color: #9ca3af;
+      font-size: 1.5rem;
+      cursor: pointer;
+    }
+
+    .close-btn:hover {
+      color: #fff;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      padding: 14px 24px;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 0.95rem;
+      z-index: 2000;
+      animation: slideIn 0.3s ease;
+    }
+
+    .toast-success {
+      background: linear-gradient(135deg, #10b981, #059669);
+    }
+
+    .toast-error {
+      background: linear-gradient(135deg, #ef4444, #dc2626);
+    }
+
+    @keyframes slideIn {
+      from {
+        transform: translateX(100%);
+        opacity: 0;
+      }
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
+    }
+
+    /* Responsive */
+    @media (max-width: 600px) {
+      .entries-table th:nth-child(4),
+      .entries-table td:nth-child(4) {
+        display: none;
+      }
+
+      .section-header {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .filter-row {
+        width: 100%;
+      }
+
+      .filter-row .input {
+        flex: 1;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header>
+      <div class="user-info">
+        <div class="user-avatar" id="userAvatar">👤</div>
+        <div class="user-details">
+          <h1 id="userName">Loading...</h1>
+          <p id="userMeta">Employee Portal</p>
+        </div>
+      </div>
+      <button class="btn btn-danger" onclick="logout()">🚪 Logout</button>
+    </header>
+
+    <!-- Today's Summary -->
+    <div class="today-card">
+      <div class="today-header">
+        <h2>📅 Today's Summary</h2>
+        <span class="today-date" id="todayDate"></span>
+      </div>
+      <div class="today-stats" id="todayStats">
+        <div class="today-stat">
+          <div class="label">First Entry</div>
+          <div class="value success" id="firstEntry">--:--</div>
+        </div>
+        <div class="today-stat">
+          <div class="label">Last Entry</div>
+          <div class="value" id="lastEntry">--:--</div>
+        </div>
+        <div class="today-stat">
+          <div class="label">Total Entries</div>
+          <div class="value" id="totalEntries">0</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Stats -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="icon">📆</div>
+        <div class="value" id="weekDays">-</div>
+        <div class="label">Days This Week</div>
+      </div>
+      <div class="stat-card">
+        <div class="icon">📊</div>
+        <div class="value" id="weekEntries">-</div>
+        <div class="label">Entries This Week</div>
+      </div>
+      <div class="stat-card">
+        <div class="icon">🗓️</div>
+        <div class="value" id="monthDays">-</div>
+        <div class="label">Days This Month</div>
+      </div>
+      <div class="stat-card highlight">
+        <div class="icon">✅</div>
+        <div class="value" id="monthEntries">-</div>
+        <div class="label">Entries This Month</div>
+      </div>
+    </div>
+
+    <!-- Entry History -->
+    <section class="section">
+      <div class="section-header">
+        <h2>📋 Entry History</h2>
+        <div class="filter-row">
+          <input type="date" class="input" id="filterDate" onchange="loadEntries()">
+          <button class="btn btn-secondary" onclick="clearFilter()">Clear</button>
+        </div>
+      </div>
+
+      <div id="entriesContainer">
+        <div class="empty-state">
+          <div class="icon">⏳</div>
+          <p>Loading entries...</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Image Modal -->
+  <div id="imageModal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modalTitle">Entry Snapshot</h3>
+        <button class="close-btn" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <img id="modalImage" src="" alt="Snapshot">
+        <p style="margin-top:15px; color:#9ca3af;" id="modalInfo"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast" style="display:none;"></div>
+
+  <script>
+    // =============================
+    // INITIALIZATION
+    // =============================
+    
+    document.addEventListener('DOMContentLoaded', () => {
+      loadProfile();
+      loadTodaySummary();
+      loadStats();
+      loadEntries();
+      
+      // Set today's date
+      const today = new Date();
+      document.getElementById('todayDate').textContent = today.toLocaleDateString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+    });
+
+    // =============================
+    // API FUNCTIONS
+    // =============================
+
+    async function loadProfile() {
+      try {
+        const res = await fetch('/employee/profile');
+        if (res.status === 401) {
+          window.location.href = '/employee';
+          return;
+        }
+        const data = await res.json();
+        
+        document.getElementById('userName').textContent = data.name;
+        document.getElementById('userMeta').textContent = `${data.employee_id} • ${data.department || 'Employee'}`;
+        
+        if (data.photo_path) {
+          document.getElementById('userAvatar').innerHTML = `<img src="/${data.photo_path}" alt="${data.name}">`;
+        }
+      } catch (e) {
+        console.error('Failed to load profile:', e);
+      }
+    }
+
+    async function loadTodaySummary() {
+      try {
+        const res = await fetch('/employee/today');
+        const data = await res.json();
+        
+        if (data.has_entries) {
+          document.getElementById('firstEntry').textContent = data.first_entry;
+          document.getElementById('lastEntry').textContent = data.last_entry;
+          document.getElementById('totalEntries').textContent = data.total_entries;
+        } else {
+          document.getElementById('firstEntry').textContent = '--:--';
+          document.getElementById('lastEntry').textContent = '--:--';
+          document.getElementById('totalEntries').textContent = '0';
+        }
+      } catch (e) {
+        console.error('Failed to load today summary:', e);
+      }
+    }
+
+    async function loadStats() {
+      try {
+        const res = await fetch('/employee/stats');
+        const data = await res.json();
+        
+        document.getElementById('weekDays').textContent = data.this_week.days_present;
+        document.getElementById('weekEntries').textContent = data.this_week.total_entries;
+        document.getElementById('monthDays').textContent = data.this_month.days_present;
+        document.getElementById('monthEntries').textContent = data.this_month.total_entries;
+      } catch (e) {
+        console.error('Failed to load stats:', e);
+      }
+    }
+
+    async function loadEntries() {
+      const container = document.getElementById('entriesContainer');
+      const filterDate = document.getElementById('filterDate').value;
+      
+      container.innerHTML = `
+        <div class="empty-state">
+          <div class="icon">⏳</div>
+          <p>Loading entries...</p>
+        </div>
+      `;
+      
+      try {
+        let url = '/employee/entries';
+        if (filterDate) {
+          url += `?date=${filterDate}`;
+        }
+        
+        const res = await fetch(url);
+        const entries = await res.json();
+        
+        if (entries.length === 0) {
+          container.innerHTML = `
+            <div class="empty-state">
+              <div class="icon">📭</div>
+              <p>${filterDate ? 'No entries for this date' : 'No entries found'}</p>
+            </div>
+          `;
+          return;
+        }
+        
+        // Group entries by date
+        const grouped = {};
+        entries.forEach(entry => {
+          const date = entry.date;
+          if (!grouped[date]) {
+            grouped[date] = [];
+          }
+          grouped[date].push(entry);
+        });
+        
+        let html = '<table class="entries-table"><thead><tr>';
+        html += '<th>Date</th><th>Time</th><th>Snapshot</th><th>Confidence</th>';
+        html += '</tr></thead><tbody>';
+        
+        for (const [date, dateEntries] of Object.entries(grouped)) {
+          dateEntries.forEach((entry, idx) => {
+            html += '<tr>';
+            html += `<td class="entry-date">${idx === 0 ? formatDate(date) : ''}</td>`;
+            html += `<td class="entry-time">${entry.time}</td>`;
+            
+            if (entry.snapshot_path) {
+              html += `<td><img src="/${entry.snapshot_path}" class="snapshot-thumb" onclick="showSnapshot('/${entry.snapshot_path}', '${entry.date} ${entry.time}')"></td>`;
+            } else {
+              html += '<td class="no-snapshot">No image</td>';
+            }
+            
+            if (entry.confidence) {
+              const confClass = entry.confidence >= 70 ? 'confidence-high' : 'confidence-medium';
+              html += `<td><span class="confidence-badge ${confClass}">${entry.confidence}%</span></td>`;
+            } else {
+              html += '<td>-</td>';
+            }
+            
+            html += '</tr>';
+          });
+        }
+        
+        html += '</tbody></table>';
+        container.innerHTML = html;
+        
+      } catch (e) {
+        console.error('Failed to load entries:', e);
+        container.innerHTML = `
+          <div class="empty-state">
+            <div class="icon">❌</div>
+            <p>Failed to load entries</p>
+          </div>
+        `;
+      }
+    }
+
+    function formatDate(dateStr) {
+      const date = new Date(dateStr);
+      const today = new Date();
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      
+      if (dateStr === today.toISOString().split('T')[0]) {
+        return 'Today';
+      } else if (dateStr === yesterday.toISOString().split('T')[0]) {
+        return 'Yesterday';
+      } else {
+        return date.toLocaleDateString('en-US', {
+          weekday: 'short',
+          month: 'short',
+          day: 'numeric'
+        });
+      }
+    }
+
+    function clearFilter() {
+      document.getElementById('filterDate').value = '';
+      loadEntries();
+    }
+
+    // =============================
+    // MODAL FUNCTIONS
+    // =============================
+
+    function showSnapshot(src, info) {
+      document.getElementById('modalImage').src = src;
+      document.getElementById('modalInfo').textContent = info;
+      document.getElementById('imageModal').style.display = 'flex';
+    }
+
+    function closeModal() {
+      document.getElementById('imageModal').style.display = 'none';
+    }
+
+    // Close modal on outside click
+    document.getElementById('imageModal').addEventListener('click', (e) => {
+      if (e.target.id === 'imageModal') {
+        closeModal();
+      }
+    });
+
+    // =============================
+    // LOGOUT
+    // =============================
+
+    async function logout() {
+      if (!confirm('Are you sure you want to logout?')) return;
+      
+      try {
+        await fetch('/employee/logout', { method: 'POST' });
+      } catch (e) {}
+      
+      window.location.href = '/employee';
+    }
+
+    // =============================
+    // TOAST
+    // =============================
+
+    function showToast(msg, success = true) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.className = success ? 'toast toast-success' : 'toast toast-error';
+      toast.style.display = 'block';
+      setTimeout(() => toast.style.display = 'none', 3000);
+    }
+  </script>
+</body>
+</html>

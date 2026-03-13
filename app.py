@@ -16,6 +16,7 @@ from sqlalchemy import select, delete, update
 from sqlalchemy.exc import IntegrityError
 from db import SessionLocal, init_db, Person, Event, Entry
 from cloudflare_tunnel import cf_tunnel
+from utils import hash_password, verify_password, generate_emp_id
 
 os.environ.setdefault("INSIGHTFACE_HOME", os.path.join(os.getcwd(), ".insightface"))
 
@@ -107,33 +108,83 @@ def cleanup_old_events():
         s.commit()
 
 def load_known_faces_into_db_once():
-    with SessionLocal() as s:
-        for role in ["authorized", "restricted"]:
-            role_dir = os.path.join(KNOWN_FACES_DIR, role)
-            if not os.path.exists(role_dir):
+    """Load faces from known_faces folder into DB (for backward compatibility)"""
+    from utils import hash_password, generate_emp_id
+    
+    for role in ["authorized", "restricted"]:
+        folder = os.path.join(KNOWN_FACES_DIR, role)
+        if not os.path.exists(folder):
+            os.makedirs(folder, exist_ok=True)
+            continue
+        
+        for fname in os.listdir(folder):
+            if not fname.lower().endswith(('.jpg', '.jpeg', '.png')):
                 continue
-            for file in os.listdir(role_dir):
-                name = os.path.splitext(file)[0]
-                # skip if already in DB
-                exists = s.scalar(select(Person).where(Person.name == name))
+            
+            name = os.path.splitext(fname)[0]
+            img_path = os.path.join(folder, fname)
+            
+            with SessionLocal() as s:
+                # Check if already exists by name or image_path
+                exists = s.query(Person).filter(
+                    (Person.name == name) | (Person.image_path == img_path)
+                ).first()
+                
                 if exists:
                     continue
-                path = os.path.join(role_dir, file)
-                img = cv2.imread(path)
+                
+                # Extract face embedding
+                img = cv2.imread(img_path)
                 if img is None:
+                    print(f"⚠️ Could not read image: {img_path}")
                     continue
+                
                 faces = face_app.get(img)
                 if not faces:
+                    print(f"⚠️ No face found in: {img_path}")
                     continue
+                
                 face = max(faces, key=lambda f: (f.bbox[2]-f.bbox[0])*(f.bbox[3]-f.bbox[1]))
                 emb = face.normed_embedding
                 if emb is None:
+                    print(f"⚠️ Could not extract embedding from: {img_path}")
                     continue
-                p = Person(
-                    name=name, role=role, image_path=path, embedding=np_to_blob(emb)
+                
+                # Generate unique emp_id and username
+                emp_id = generate_emp_id()
+                # Make sure emp_id is unique
+                while s.query(Person).filter(Person.emp_id == emp_id).first():
+                    emp_id = generate_emp_id()
+                
+                # Generate username from name
+                base_username = name.lower().replace(" ", "_").replace("-", "_")
+                username = base_username
+                counter = 1
+                while s.query(Person).filter(Person.username == username).first():
+                    username = f"{base_username}_{counter}"
+                    counter += 1
+                
+                # Create person with all required fields
+                person = Person(
+                    name=name,
+                    emp_id=emp_id,
+                    username=username,
+                    password=hash_password("password123"),  # Default password
+                    mobile=None,
+                    email=None,
+                    role=role,
+                    designation=None,
+                    department=None,
+                    image_path=img_path,
+                    embedding=np_to_blob(emb),
+                    is_active=1
                 )
-                s.add(p)
-        s.commit()
+                
+                s.add(person)
+                s.commit()
+                print(f"✅ Added {role} person: {name} (ID: {emp_id}, Username: {username})")
+    
+    rebuild_cache()
 
 @app.on_event("startup")
 def on_startup():
@@ -998,6 +1049,441 @@ def stop_tunnel():
 def tunnel_history():
     """Get URL history"""
     return JSONResponse(cf_tunnel.get_url_history())
+
+# =============================
+# EMPLOYEE MANAGEMENT ENDPOINTS
+# =============================
+
+# Serve the employees page
+@app.get("/admin/employees", response_class=HTMLResponse)
+def admin_employees_page():
+    """Serve the employee management page"""
+    if not admin_logged_in:
+        return HTMLResponse('<script>window.location.href="/admin/login";</script>')
+    return FileResponse("templates/admin_employees.html")
+
+
+# Static routes FIRST (before dynamic routes)
+@app.get("/admin/employees/list")
+def list_employees():
+    """Get all employees with full details"""
+    if not admin_logged_in:
+        raise HTTPException(status_code=403, detail="Not logged in")
+    
+    with SessionLocal() as s:
+        employees = s.query(Person).order_by(Person.name).all()
+        return [
+            {
+                "id": emp.id,
+                "name": emp.name,
+                "emp_id": emp.emp_id,
+                "username": emp.username,
+                "mobile": emp.mobile,
+                "email": emp.email,
+                "role": emp.role,
+                "designation": emp.designation,
+                "department": emp.department,
+                "image_path": emp.image_path.replace("\\", "/") if emp.image_path else None,
+                "is_active": emp.is_active if emp.is_active is not None else 1,
+                "created_at": emp.created_at.strftime("%Y-%m-%d %H:%M") if emp.created_at else None,
+                "updated_at": emp.updated_at.strftime("%Y-%m-%d %H:%M") if emp.updated_at else None
+            }
+            for emp in employees
+        ]
+
+
+@app.get("/admin/employee/generate-id")
+def generate_employee_id():
+    """Generate a unique employee ID"""
+    if not admin_logged_in:
+        raise HTTPException(status_code=403, detail="Not logged in")
+    
+    from utils import generate_emp_id
+    
+    with SessionLocal() as s:
+        while True:
+            new_id = generate_emp_id()
+            existing = s.query(Person).filter(Person.emp_id == new_id).first()
+            if not existing:
+                return {"emp_id": new_id}
+
+
+@app.get("/admin/departments")
+def get_departments():
+    """Get list of unique departments"""
+    if not admin_logged_in:
+        raise HTTPException(status_code=403)
+    
+    with SessionLocal() as s:
+        departments = s.query(Person.department).distinct().all()
+        return [d[0] for d in departments if d[0]]
+
+
+@app.get("/admin/designations")
+def get_designations():
+    """Get list of unique designations"""
+    if not admin_logged_in:
+        raise HTTPException(status_code=403)
+    
+    with SessionLocal() as s:
+        designations = s.query(Person.designation).distinct().all()
+        return [d[0] for d in designations if d[0]]
+
+
+@app.post("/admin/employee/add")
+async def add_employee(
+    name: str = Form(...),
+    emp_id: str = Form(...),
+    username: str = Form(...),
+    password: str = Form(...),
+    mobile: str = Form(None),
+    email: str = Form(None),
+    role: str = Form("authorized"),
+    designation: str = Form(None),
+    department: str = Form(None),
+    image: UploadFile = File(...)
+):
+    """Add a new employee with full details"""
+    if not admin_logged_in:
+        raise HTTPException(status_code=403, detail="Not logged in")
+
+    if role not in ["authorized", "restricted"]:
+        raise HTTPException(status_code=400, detail="Invalid role. Must be 'authorized' or 'restricted'")
+
+    # Save image
+    save_dir = os.path.join(KNOWN_FACES_DIR, role)
+    os.makedirs(save_dir, exist_ok=True)
+    img_path = os.path.join(save_dir, f"{emp_id}.jpg")
+    
+    with open(img_path, "wb") as buffer:
+        shutil.copyfileobj(image.file, buffer)
+
+    # Extract face embedding
+    img = cv2.imread(img_path)
+    faces = face_app.get(img)
+    if not faces:
+        os.remove(img_path)
+        raise HTTPException(status_code=400, detail="No face found in image. Please upload a clear face photo.")
+    
+    face = max(faces, key=lambda f: (f.bbox[2]-f.bbox[0])*(f.bbox[3]-f.bbox[1]))
+    emb = face.normed_embedding
+    if emb is None:
+        os.remove(img_path)
+        raise HTTPException(status_code=400, detail="Failed to compute face embedding")
+
+    # Hash password
+    hashed_password = hash_password(password)
+
+    # Save to database
+    with SessionLocal() as s:
+        # Check for duplicates
+        existing_emp = s.query(Person).filter(Person.emp_id == emp_id).first()
+        if existing_emp:
+            os.remove(img_path)
+            raise HTTPException(status_code=409, detail=f"Employee ID '{emp_id}' already exists")
+        
+        existing_user = s.query(Person).filter(Person.username == username).first()
+        if existing_user:
+            os.remove(img_path)
+            raise HTTPException(status_code=409, detail=f"Username '{username}' already exists")
+
+        employee = Person(
+            name=name,
+            emp_id=emp_id,
+            username=username,
+            password=hashed_password,
+            mobile=mobile if mobile else None,
+            email=email if email else None,
+            role=role,
+            designation=designation if designation else None,
+            department=department if department else None,
+            image_path=img_path,
+            embedding=np_to_blob(emb),
+            is_active=1
+        )
+        
+        try:
+            s.add(employee)
+            s.commit()
+            s.refresh(employee)
+            emp_data = {
+                "id": employee.id,
+                "name": employee.name,
+                "emp_id": employee.emp_id
+            }
+        except IntegrityError as e:
+            s.rollback()
+            os.remove(img_path)
+            raise HTTPException(status_code=409, detail="Employee already exists")
+
+    rebuild_cache()
+    return {"status": "success", "message": f"Employee '{name}' added successfully", "employee": emp_data}
+
+
+# Dynamic routes AFTER static routes
+@app.get("/admin/employee/{emp_id}")
+def get_employee(emp_id: str):
+    """Get single employee details"""
+    if not admin_logged_in:
+        raise HTTPException(status_code=403)
+    
+    with SessionLocal() as s:
+        emp = s.query(Person).filter(Person.emp_id == emp_id).first()
+        if not emp:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        
+        return {
+            "id": emp.id,
+            "name": emp.name,
+            "emp_id": emp.emp_id,
+            "username": emp.username,
+            "mobile": emp.mobile,
+            "email": emp.email,
+            "role": emp.role,
+            "designation": emp.designation,
+            "department": emp.department,
+            "image_path": emp.image_path.replace("\\", "/") if emp.image_path else None,
+            "is_active": emp.is_active if emp.is_active is not None else 1,
+            "created_at": emp.created_at.strftime("%Y-%m-%d %H:%M") if emp.created_at else None
+        }
+
+
+@app.put("/admin/employee/{emp_id}")
+async def update_employee(
+    emp_id: str,
+    name: str = Form(None),
+    new_emp_id: str = Form(None),
+    role: str = Form(None),
+    designation: str = Form(None),
+    department: str = Form(None),
+    mobile: str = Form(None),
+    email: str = Form(None),
+    is_active: int = Form(None),
+    image: UploadFile = File(None)
+):
+    """Update employee details"""
+    if not admin_logged_in:
+        raise HTTPException(status_code=403, detail="Not logged in")
+
+    if emp_id == "undefined" or not emp_id:
+        raise HTTPException(status_code=400, detail="Invalid employee ID")
+
+    with SessionLocal() as s:
+        emp = s.query(Person).filter(Person.emp_id == emp_id).first()
+        if not emp:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        # Store name before session closes
+        emp_name = emp.name
+
+        # Update fields if provided
+        if name is not None and name.strip():
+            emp.name = name.strip()
+            emp_name = name.strip()
+        
+        if new_emp_id is not None and new_emp_id.strip() and new_emp_id != emp_id:
+            existing = s.query(Person).filter(Person.emp_id == new_emp_id).first()
+            if existing:
+                raise HTTPException(status_code=409, detail=f"Employee ID '{new_emp_id}' already exists")
+            emp.emp_id = new_emp_id.strip()
+        
+        if role is not None and role in ["authorized", "restricted"]:
+            emp.role = role
+        
+        if designation is not None:
+            emp.designation = designation.strip() if designation.strip() else None
+        
+        if department is not None:
+            emp.department = department.strip() if department.strip() else None
+        
+        if mobile is not None:
+            emp.mobile = mobile.strip() if mobile.strip() else None
+        
+        if email is not None:
+            emp.email = email.strip() if email.strip() else None
+        
+        if is_active is not None:
+            emp.is_active = is_active
+
+        # Update image if provided
+        if image is not None and image.filename:
+            save_dir = os.path.join(KNOWN_FACES_DIR, emp.role)
+            os.makedirs(save_dir, exist_ok=True)
+            img_path = os.path.join(save_dir, f"{emp.emp_id}.jpg")
+            
+            if emp.image_path and os.path.exists(emp.image_path) and emp.image_path != img_path:
+                try:
+                    os.remove(emp.image_path)
+                except:
+                    pass
+            
+            with open(img_path, "wb") as buffer:
+                shutil.copyfileobj(image.file, buffer)
+
+            img = cv2.imread(img_path)
+            faces = face_app.get(img)
+            if not faces:
+                os.remove(img_path)
+                raise HTTPException(status_code=400, detail="No face found in new image")
+            
+            face = max(faces, key=lambda f: (f.bbox[2]-f.bbox[0])*(f.bbox[3]-f.bbox[1]))
+            emb = face.normed_embedding
+            if emb is None:
+                os.remove(img_path)
+                raise HTTPException(status_code=400, detail="Failed to compute face embedding")
+
+            emp.image_path = img_path
+            emp.embedding = np_to_blob(emb)
+
+        s.commit()
+
+    rebuild_cache()
+    return {"status": "success", "message": f"Employee '{emp_name}' updated successfully"}
+
+
+@app.delete("/admin/employee/{emp_id}")
+def delete_employee(emp_id: str):
+    """Delete an employee"""
+    if not admin_logged_in:
+        raise HTTPException(status_code=403)
+    
+    if emp_id == "undefined" or not emp_id:
+        raise HTTPException(status_code=400, detail="Invalid employee ID")
+    
+    with SessionLocal() as s:
+        emp = s.query(Person).filter(Person.emp_id == emp_id).first()
+        if not emp:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        
+        # Remove image file
+        if emp.image_path and os.path.exists(emp.image_path):
+            try:
+                os.remove(emp.image_path)
+            except:
+                pass
+        
+        s.delete(emp)
+        s.commit()
+
+    rebuild_cache()
+    return {"status": "success", "message": "Employee deleted"}
+
+# =============================
+# EMPLOYEE SELF-SERVICE ENDPOINTS (for employee portal later)
+# =============================
+
+@app.post("/employee/login")
+def employee_login(data: dict = Body(...)):
+    """Employee login"""
+    username = data.get("username")
+    password = data.get("password")
+    
+    if not username or not password:
+        return JSONResponse({"status": "fail", "message": "Username and password required"}, status_code=400)
+    
+    with SessionLocal() as s:
+        emp = s.query(Person).filter(Person.username == username).first()
+        if not emp:
+            return JSONResponse({"status": "fail", "message": "Invalid credentials"}, status_code=401)
+        
+        if not emp.is_active:
+            return JSONResponse({"status": "fail", "message": "Account is deactivated"}, status_code=403)
+        
+        if not verify_password(password, emp.password):
+            return JSONResponse({"status": "fail", "message": "Invalid credentials"}, status_code=401)
+        
+        return {
+            "status": "success",
+            "employee": {
+                "id": emp.id,
+                "name": emp.name,
+                "emp_id": emp.emp_id,
+                "username": emp.username,
+                "designation": emp.designation,
+                "department": emp.department
+            }
+        }
+
+
+@app.put("/employee/change-password")
+def employee_change_password(data: dict = Body(...)):
+    """Employee change password"""
+    username = data.get("username")
+    current_password = data.get("current_password")
+    new_password = data.get("new_password")
+    
+    if not all([username, current_password, new_password]):
+        return JSONResponse({"status": "fail", "message": "All fields required"}, status_code=400)
+    
+    if len(new_password) < 6:
+        return JSONResponse({"status": "fail", "message": "Password must be at least 6 characters"}, status_code=400)
+    
+    with SessionLocal() as s:
+        emp = s.query(Person).filter(Person.username == username).first()
+        if not emp:
+            return JSONResponse({"status": "fail", "message": "User not found"}, status_code=404)
+        
+        if not verify_password(current_password, emp.password):
+            return JSONResponse({"status": "fail", "message": "Current password is incorrect"}, status_code=401)
+        
+        emp.password = hash_password(new_password)
+        s.commit()
+    
+    return {"status": "success", "message": "Password changed successfully"}
+
+
+@app.put("/employee/update-profile")
+async def employee_update_profile(
+    username: str = Form(...),
+    password: str = Form(...),
+    mobile: str = Form(None),
+    email: str = Form(None),
+    image: UploadFile = File(None)
+):
+    """Employee update own profile (limited fields)"""
+    with SessionLocal() as s:
+        emp = s.query(Person).filter(Person.username == username).first()
+        if not emp:
+            return JSONResponse({"status": "fail", "message": "User not found"}, status_code=404)
+        
+        if not verify_password(password, emp.password):
+            return JSONResponse({"status": "fail", "message": "Invalid password"}, status_code=401)
+        
+        # Update allowed fields
+        if mobile is not None:
+            emp.mobile = mobile
+        
+        if email is not None:
+            emp.email = email
+        
+        # Update photo if provided
+        if image is not None:
+            save_dir = os.path.join(KNOWN_FACES_DIR, emp.role)
+            os.makedirs(save_dir, exist_ok=True)
+            img_path = os.path.join(save_dir, f"{emp.emp_id}.jpg")
+            
+            with open(img_path, "wb") as buffer:
+                shutil.copyfileobj(image.file, buffer)
+
+            img = cv2.imread(img_path)
+            faces = face_app.get(img)
+            if not faces:
+                os.remove(img_path)
+                return JSONResponse({"status": "fail", "message": "No face found in image"}, status_code=400)
+            
+            face = max(faces, key=lambda f: (f.bbox[2]-f.bbox[0])*(f.bbox[3]-f.bbox[1]))
+            emb = face.normed_embedding
+            if emb is None:
+                os.remove(img_path)
+                return JSONResponse({"status": "fail", "message": "Failed to process face"}, status_code=400)
+
+            emp.image_path = img_path
+            emp.embedding = np_to_blob(emb)
+        
+        s.commit()
+    
+    rebuild_cache()
+    return {"status": "success", "message": "Profile updated successfully"}
 
 if __name__ == "__main__":
     import uvicorn

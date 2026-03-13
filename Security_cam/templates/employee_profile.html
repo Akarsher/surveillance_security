@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <title>Employee Profile</title>
+</head>
+<body>
+    <div class="container">
+        <h1>Employee Profile</h1>
+        <form id="profile-form" method="POST" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="username">Username:</label>
+                <input type="text" id="username" name="username" value="{{ employee.username }}" required>
+            </div>
+            <div class="form-group">
+                <label for="emp_id">Employee ID:</label>
+                <input type="text" id="emp_id" name="emp_id" value="{{ employee.emp_id }}" required>
+            </div>
+            <div class="form-group">
+                <label for="mobile">Mobile Number:</label>
+                <input type="tel" id="mobile" name="mobile" value="{{ employee.mobile }}" required>
+            </div>
+            <div class="form-group">
+                <label for="authorization">Authorization:</label>
+                <select id="authorization" name="authorization" required>
+                    <option value="authorized" {% if employee.authorization == 'authorized' %}selected{% endif %}>Authorized</option>
+                    <option value="restricted" {% if employee.authorization == 'restricted' %}selected{% endif %}>Restricted</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="role">Role:</label>
+                <input type="text" id="role" name="role" value="{{ employee.role }}" required>
+            </div>
+            <div class="form-group">
+                <label for="photo">Profile Photo:</label>
+                <input type="file" id="photo" name="photo" accept="image/*">
+                {% if employee.photo %}
+                    <img src="{{ employee.photo }}" alt="Profile Photo" class="profile-photo">
+                {% endif %}
+            </div>
+            <div class="form-group">
+                <label for="password">Change Password:</label>
+                <input type="password" id="password" name="password">
+            </div>
+            <button type="submit">Update Profile</button>
+        </form>
+    </div>
+    <script src="/static/js/admin.js"></script>
+</body>
+</html>

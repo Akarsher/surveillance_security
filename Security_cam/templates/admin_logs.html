@@ -1,0 +1,34 @@
+<html>
+<head>
+    <title>Admin Logs</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <h2>Security Event Logs</h2>
+    <table border="1" cellpadding="6">
+        <tr>
+            <th>Time</th>
+            <th>Reason</th>
+            <th>Authorized</th>
+            <th>Restricted</th>
+            <th>Unknown</th>
+            <th>Snapshot</th>
+        </tr>
+        <!-- Logs will be dynamically populated here -->
+        <tbody id="log-entries">
+            <!-- Example log entry -->
+            <!-- 
+            <tr>
+                <td>2023-10-01 12:00:00</td>
+                <td>Unauthorized access attempt</td>
+                <td>0</td>
+                <td>1</td>
+                <td>0</td>
+                <td><a href='/snapshots/example_snapshot.jpg' target='_blank'>View</a></td>
+            </tr>
+            -->
+        </tbody>
+    </table>
+    <script src="/static/js/admin.js"></script>
+</body>
+</html>
