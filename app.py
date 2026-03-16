@@ -795,9 +795,41 @@ def admin_login(data: dict = Body(...)):
 
 @app.post("/admin/logout")
 def admin_logout():
+    """Logout admin and clear session"""
     global admin_logged_in
     admin_logged_in = False
-    return {"status": "success"}
+    return {"status": "success", "message": "Admin logged out successfully"}
+
+@app.post("/employee/logout")
+def employee_logout():
+    """Logout employee and clear session"""
+    # No specific session handling for employees, just return success
+    return {"status": "success", "message": "Employee logged out successfully"}
+
+@app.post("/auth/admin/login")
+def auth_admin_login(data: dict = Body(...)):
+    """Admin login endpoint"""
+    global admin_logged_in
+    
+    username = data.get("username", "").strip()
+    password = data.get("password", "")
+    
+    if username == "admin" and password == "admin123":
+        admin_logged_in = True
+        return {
+            "status": "success",
+            "message": "Welcome, Admin!",
+            "redirect": "/admin",  # Ensure this is included
+            "user": {
+                "username": "admin",
+                "role": "admin"
+            }
+        }
+    
+    return JSONResponse(
+        {"status": "fail", "message": "Invalid admin credentials"},
+        status_code=401
+    )
 
 @app.post("/admin/add_person")
 async def add_person(
@@ -1484,6 +1516,450 @@ async def employee_update_profile(
     
     rebuild_cache()
     return {"status": "success", "message": "Profile updated successfully"}
+
+@app.post("/employee/update-profile")
+async def update_employee_profile(
+    id: int = Form(...),
+    name: str = Form(...),
+    mobile: str = Form(...),
+    password: Optional[str] = Form(None),
+    image: Optional[UploadFile] = File(None)
+):
+    """Update employee profile"""
+    with SessionLocal() as s:
+        emp = s.query(Person).filter(Person.id == id).first()
+        if not emp:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        emp.name = name
+        emp.mobile = mobile
+        if password:
+            emp.password = hash_password(password)
+
+        # Handle profile picture upload
+        if image:
+            save_dir = os.path.join(KNOWN_FACES_DIR, emp.role)
+            os.makedirs(save_dir, exist_ok=True)
+            img_path = os.path.join(save_dir, f"{emp.emp_id}.jpg")
+            
+            # Save the new image
+            with open(img_path, "wb") as buffer:
+                shutil.copyfileobj(image.file, buffer)
+            
+            emp.image_path = img_path
+
+        s.commit()
+        return {
+            "id": emp.id,
+            "name": emp.name,
+            "username": emp.username,
+            "emp_id": emp.emp_id,
+            "role": emp.role,
+            "mobile": emp.mobile,
+            "image_path": emp.image_path.replace("\\", "/") if emp.image_path else None
+        }
+
+@app.post("/employee/update-profile")
+def update_employee_profile(data: dict = Body(...)):
+    """Update employee profile"""
+    emp_id = data.get("id")
+    name = data.get("name")
+    mobile = data.get("mobile")
+    password = data.get("password")
+
+    with SessionLocal() as s:
+        emp = s.query(Person).filter(Person.id == emp_id).first()
+        if not emp:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        emp.name = name
+        emp.mobile = mobile
+        if password:
+            emp.password = hash_password(password)
+
+        s.commit()
+        return {"status": "success", "message": "Profile updated successfully"}
+
+# =============================
+# AUTHENTICATION ENDPOINTS
+# =============================
+
+# Serve common login page
+@app.get("/login", response_class=HTMLResponse)
+def login_page():
+    """Serve common login page"""
+    return FileResponse("templates/login.html")
+
+
+# Redirect root to login
+@app.get("/", response_class=HTMLResponse)
+def root():
+    """Redirect to login"""
+    return HTMLResponse('<script>window.location.href="/login";</script>')
+
+
+# Admin login
+@app.post("/auth/admin/login")
+def auth_admin_login(data: dict = Body(...)):
+    """Admin login endpoint"""
+    global admin_logged_in
+    
+    username = data.get("username", "").strip()
+    password = data.get("password", "")
+    
+    # Check admin credentials (you can change these)
+    if username == "admin" and password == "admin123":
+        admin_logged_in = True
+        return {
+            "status": "success",
+            "message": "Welcome, Admin!",
+            "redirect": "/admin",
+            "user": {
+                "username": "admin",
+                "role": "admin"
+            }
+        }
+    
+    return JSONResponse(
+        {"status": "fail", "message": "Invalid admin credentials"},
+        status_code=401
+    )
+
+
+# Employee login
+@app.post("/auth/employee/login")
+def auth_employee_login(data: dict = Body(...)):
+    """Employee login endpoint"""
+    username = data.get("username", "").strip()
+    password = data.get("password", "")
+    
+    if not username or not password:
+        return JSONResponse(
+            {"status": "fail", "message": "Username and password required"},
+            status_code=400
+        )
+    
+    with SessionLocal() as s:
+        # Find by username or emp_id
+        emp = s.query(Person).filter(
+            (Person.username == username) | (Person.emp_id == username)
+        ).first()
+        
+        if not emp:
+            return JSONResponse(
+                {"status": "fail", "message": "Invalid credentials"},
+                status_code=401
+            )
+        
+        if not emp.is_active:
+            return JSONResponse(
+                {"status": "fail", "message": "Account is deactivated. Contact admin."},
+                status_code=403
+            )
+        
+        if not verify_password(password, emp.password):
+            return JSONResponse(
+                {"status": "fail", "message": "Invalid credentials"},
+                status_code=401
+            )
+        
+        return {
+            "status": "success",
+            "message": f"Welcome, {emp.name}!",
+            "redirect": "/employee",
+            "user": {
+                "id": emp.id,
+                "name": emp.name,
+                "emp_id": emp.emp_id,
+                "username": emp.username,
+                "designation": emp.designation,
+                "department": emp.department,
+                "image_path": emp.image_path.replace("\\", "/") if emp.image_path else None,
+                "role": emp.role
+            }
+        }
+
+
+# Face login
+@app.post("/auth/face-login")
+async def auth_face_login(image: UploadFile = File(...)):
+    """Login using face recognition"""
+    # Read image
+    contents = await image.read()
+    nparr = np.frombuffer(contents, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    
+    if img is None:
+        return JSONResponse(
+            {"status": "fail", "message": "Invalid image"},
+            status_code=400
+        )
+    
+    # Detect faces
+    faces = face_app.get(img)
+    if not faces:
+        return JSONResponse(
+            {"status": "fail", "message": "No face detected. Please try again."},
+            status_code=400
+        )
+    
+    # Get largest face
+    face = max(faces, key=lambda f: (f.bbox[2]-f.bbox[0])*(f.bbox[3]-f.bbox[1]))
+    emb = face.normed_embedding
+    
+    if emb is None:
+        return JSONResponse(
+            {"status": "fail", "message": "Could not process face. Please try again."},
+            status_code=400
+        )
+    
+    # Match against known faces
+    best_match = None
+    best_score = 0.0
+    threshold = 0.5
+    
+    with SessionLocal() as s:
+        persons = s.query(Person).filter(Person.is_active == 1).all()
+        
+        for person in persons:
+            if person.embedding:
+                known_emb = blob_to_np(person.embedding)
+                score = np.dot(emb, known_emb)
+                
+                if score > threshold and score > best_score:
+                    best_score = score
+                    best_match = person
+        
+        if best_match:
+            return {
+                "status": "success",
+                "message": f"Welcome, {best_match.name}!",
+                "redirect": "/employee",
+                "user": {
+                    "id": best_match.id,
+                    "name": best_match.name,
+                    "emp_id": best_match.emp_id,
+                    "username": best_match.username,
+                    "designation": best_match.designation,
+                    "department": best_match.department,
+                    "image_path": best_match.image_path.replace("\\", "/") if best_match.image_path else None,
+                    "role": best_match.role
+                },
+                "confidence": float(best_score)
+            }
+    
+    return JSONResponse(
+        {"status": "fail", "message": "Face not recognized. Please use password login."},
+        status_code=401
+    )
+
+
+# Serve employee dashboard
+@app.get("/employee", response_class=HTMLResponse)
+def employee_dashboard():
+    """Serve employee dashboard"""
+    return FileResponse("templates/employee_dashboard.html")
+
+
+# =============================
+# EMPLOYEE ATTENDANCE ENDPOINTS
+# =============================
+
+@app.get("/employee/today-status")
+def employee_today_status(emp_id: str = Query(...)):
+    """Get employee's today status"""
+    from datetime import date
+    
+    today = date.today()
+    today_start = datetime.combine(today, datetime.min.time())
+    today_end = datetime.combine(today, datetime.max.time())
+    
+    with SessionLocal() as s:
+        emp = s.query(Person).filter(Person.emp_id == emp_id).first()
+        if not emp:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        
+        # Get today's entries
+        entries = s.query(Entry).filter(
+            Entry.time >= today_start,
+            Entry.time <= today_end,
+            Entry.names.contains(emp.name)
+        ).order_by(Entry.time).all()
+        
+        # Parse check-in/out times
+        check_in_time = None
+        check_out_time = None
+        activities = []
+        
+        for entry in entries:
+            entry_type = "check-in" if not check_in_time else "check-out"
+            
+            if not check_in_time:
+                check_in_time = entry.time
+            else:
+                check_out_time = entry.time
+            
+            activities.append({
+                "type": entry_type,
+                "time": entry.time.strftime("%I:%M %p"),
+                "method": "Face Recognition"
+            })
+        
+        # Calculate hours
+        hours_today = "0h 0m"
+        if check_in_time:
+            end_time = check_out_time or datetime.now()
+            diff = end_time - check_in_time
+            hours = int(diff.total_seconds() // 3600)
+            minutes = int((diff.total_seconds() % 3600) // 60)
+            hours_today = f"{hours}h {minutes}m"
+        
+        # Week stats (simplified)
+        week_start = today - timedelta(days=today.weekday())
+        week_entries = s.query(Entry).filter(
+            Entry.time >= datetime.combine(week_start, datetime.min.time()),
+            Entry.names.contains(emp.name)
+        ).all()
+        
+        # Count unique days
+        week_days = len(set(e.time.date() for e in week_entries))
+        
+        return {
+            "status": "success",
+            "checked_in": check_in_time is not None,
+            "checked_out": check_out_time is not None,
+            "check_in_time": check_in_time.strftime("%I:%M %p") if check_in_time else None,
+            "check_out_time": check_out_time.strftime("%I:%M %p") if check_out_time else None,
+            "hours_today": hours_today,
+            "week_hours": f"{week_days * 8}h 0m",  # Simplified
+            "week_days": week_days,
+            "activities": activities
+        }
+
+
+@app.post("/employee/face-attendance")
+async def employee_face_attendance(
+    image: UploadFile = File(...),
+    emp_id: str = Form(...),
+    action: str = Form(...)  # 'in' or 'out'
+):
+    """Record attendance using face recognition"""
+    # Read image
+    contents = await image.read()
+    nparr = np.frombuffer(contents, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    
+    if img is None:
+        return JSONResponse(
+            {"status": "fail", "message": "Invalid image"},
+            status_code=400
+        )
+    
+    # Detect faces
+    faces = face_app.get(img)
+    if not faces:
+        return JSONResponse(
+            {"status": "fail", "message": "No face detected"},
+            status_code=400
+        )
+    
+    face = max(faces, key=lambda f: (f.bbox[2]-f.bbox[0])*(f.bbox[3]-f.bbox[1]))
+    emb = face.normed_embedding
+    
+    if emb is None:
+        return JSONResponse(
+            {"status": "fail", "message": "Could not process face"},
+            status_code=400
+        )
+    
+    # Verify against employee's registered face
+    with SessionLocal() as s:
+        emp = s.query(Person).filter(Person.emp_id == emp_id).first()
+        if not emp:
+            return JSONResponse(
+                {"status": "fail", "message": "Employee not found"},
+                status_code=404
+            )
+        
+        if not emp.embedding:
+            return JSONResponse(
+                {"status": "fail", "message": "No registered face found. Contact admin."},
+                status_code=400
+            )
+        
+        # Compare faces
+        known_emb = blob_to_np(emp.embedding)
+        score = np.dot(emb, known_emb)
+        
+        if score < 0.5:
+            return JSONResponse(
+                {"status": "fail", "message": "Face verification failed. Please try again."},
+                status_code=401
+            )
+        
+        # Record attendance
+        now = datetime.now()
+        
+        # Save snapshot
+        snapshot_dir = "snapshots/attendance"
+        os.makedirs(snapshot_dir, exist_ok=True)
+        snapshot_path = os.path.join(snapshot_dir, f"{emp_id}_{action}_{now.strftime('%Y%m%d_%H%M%S')}.jpg")
+        cv2.imwrite(snapshot_path, img)
+        
+        # Create entry
+        entry = Entry(
+            time=now,
+            count=1,
+            names=emp.name
+        )
+        s.add(entry)
+        s.commit()
+        
+        action_text = "Check-in" if action == "in" else "Check-out"
+        return {
+            "status": "success",
+            "message": f"{action_text} successful at {now.strftime('%I:%M %p')}",
+            "time": now.strftime("%I:%M %p"),
+            "confidence": float(score)
+        }
+
+@app.get("/employee/logs")
+def get_employee_logs(employee_id: int, start: Optional[str] = Query(None), end: Optional[str] = Query(None)):
+    """Fetch logs specific to an employee"""
+    def parse_date(s: Optional[str]):
+        try:
+            return datetime.strptime(s, "%Y-%m-%d") if s else None
+        except Exception:
+            return None
+
+    start_dt = parse_date(start)
+    end_dt = parse_date(end)
+    end_exclusive = end_dt + timedelta(days=1) if end_dt else None
+
+    with SessionLocal() as s:
+        stmt = select(Entry).where(Entry.names.like(f"%{employee_id}%"))
+        if start_dt:
+            stmt = stmt.where(Entry.time >= start_dt)
+        if end_exclusive:
+            stmt = stmt.where(Entry.time < end_exclusive)
+        stmt = stmt.order_by(Entry.time.desc())
+        entries = s.scalars(stmt).all()
+
+        return [
+            {
+                "date": e.time.strftime("%Y-%m-%d"),
+                "time": e.time.strftime("%H:%M:%S"),
+                "count": e.count,
+                "names": e.names.split(",") if e.names else []
+            }
+            for e in entries
+        ]
+
+# Redirect old admin login to new common login
+@app.get("/admin/login", response_class=HTMLResponse)
+def admin_login_redirect():
+    """Redirect to common login page"""
+    return HTMLResponse('<script>window.location.href="/login";</script>')
 
 if __name__ == "__main__":
     import uvicorn

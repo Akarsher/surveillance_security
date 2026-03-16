@@ -533,14 +533,25 @@
       // Update form
       const btnLogin = document.getElementById('btnLogin');
       const btnText = document.getElementById('btnText');
+      const usernameLabel = document.getElementById('usernameLabel');
+      const faceSection = document.getElementById('faceLoginSection');
       
       if (tab === 'admin') {
         btnLogin.className = 'btn-login admin';
         btnText.textContent = 'Sign In as Admin';
+        usernameLabel.textContent = 'Username';
+        document.getElementById('username').placeholder = 'Enter admin username';
+        faceSection.style.display = 'none';
       } else {
         btnLogin.className = 'btn-login employee';
         btnText.textContent = 'Sign In as Employee';
+        usernameLabel.textContent = 'Username or Employee ID';
+        document.getElementById('username').placeholder = 'Enter username or Emp ID';
+        faceSection.style.display = 'block';
       }
+      
+      // Clear messages
+      hideMessages();
     }
     
     // =============================
@@ -570,7 +581,6 @@
         const data = await res.json();
         
         if (res.ok && data.status === 'success') {
-          console.log('Login successful:', data);
           showSuccess(data.message || 'Login successful! Redirecting...');
           
           // Store session info
@@ -580,11 +590,9 @@
           
           // Redirect
           setTimeout(() => {
-            console.log('Redirecting to:', data.redirect || (currentTab === 'admin' ? '/admin' : '/employee/dashboard'));
-            window.location.href = data.redirect || (currentTab === 'admin' ? '/admin' : '/employee/dashboard');
+            window.location.href = data.redirect || (currentTab === 'admin' ? '/admin' : '/employee');
           }, 1000);
         } else {
-          console.log('Login failed:', data);
           showError(data.message || 'Invalid credentials');
         }
       } catch (err) {
