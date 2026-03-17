@@ -307,10 +307,10 @@
 
     <!-- Login Tabs -->
     <div class="login-tabs">
-      <button class="tab-btn active" onclick="showTab('pin')">
+      <button class="tab-btn active" onclick="showTab('pin', this)">
         🔢 ID + PIN
       </button>
-      <button class="tab-btn" onclick="showTab('face')">
+      <button class="tab-btn" onclick="showTab('face', this)">
         📷 Face Login
       </button>
     </div>
@@ -366,12 +366,12 @@
     let stream = null;
     let cameraActive = false;
 
-    function showTab(tab) {
+    function showTab(tab, clickedBtn) {
       currentTab = tab;
       
       // Update tab buttons
       document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-      event.target.classList.add('active');
+      if (clickedBtn) clickedBtn.classList.add('active');
       
       // Show/hide forms
       document.getElementById('pinForm').classList.toggle('active', tab === 'pin');
@@ -414,24 +414,24 @@
       hideMessage();
       
       try {
-        const formData = new FormData();
-        formData.append('employee_id', employeeId);
-        formData.append('pin', pin);
-        
-        const res = await fetch('/employee/login', {
+        const res = await fetch('/auth/employee/login', {
           method: 'POST',
-          body: formData
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: employeeId, password: pin })
         });
         
         const data = await res.json();
         
         if (res.ok) {
-          showMessage(`Welcome, ${data.name}!`, false);
+          if (data.user) {
+            sessionStorage.setItem('user', JSON.stringify(data.user));
+          }
+          showMessage(`Welcome, ${data.user?.name || 'Employee'}!`, false);
           setTimeout(() => {
-            window.location.href = '/employee/dashboard';
+            window.location.href = data.redirect || '/employee';
           }, 1000);
         } else {
-          showMessage(data.detail || 'Login failed');
+          showMessage(data.message || data.detail || 'Login failed');
         }
       } catch (e) {
         showMessage('Network error. Please try again.');
@@ -508,7 +508,7 @@
         const formData = new FormData();
         formData.append('image', blob, 'face.jpg');
         
-        const res = await fetch('/employee/login/face', {
+        const res = await fetch('/auth/face-login', {
           method: 'POST',
           body: formData
         });
@@ -516,13 +516,16 @@
         const data = await res.json();
         
         if (res.ok) {
-          showMessage(`Welcome, ${data.name}! (${data.confidence}% match)`, false);
+          if (data.user) {
+            sessionStorage.setItem('user', JSON.stringify(data.user));
+          }
+          showMessage(`Welcome, ${data.user?.name || data.name || 'Employee'}!`, false);
           stopCamera();
           setTimeout(() => {
-            window.location.href = '/employee/dashboard';
+            window.location.href = data.redirect || '/employee';
           }, 1500);
         } else {
-          showMessage(data.detail || 'Face not recognized');
+          showMessage(data.message || data.detail || 'Face not recognized');
         }
       } catch (e) {
         showMessage('Recognition failed. Please try again.');

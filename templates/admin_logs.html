@@ -82,8 +82,8 @@
     <!-- Tab Navigation -->
     <section class="section">
       <div class="tab-container">
-        <button class="tab-btn active" onclick="switchTab('violations')">🚨 Security Violations</button>
-        <button class="tab-btn" onclick="switchTab('entries')">✅ Entry Log</button>
+        <button class="tab-btn active" onclick="switchTab('violations', this)">🚨 Security Violations</button>
+        <button class="tab-btn" onclick="switchTab('entries', this)">✅ Entry Log</button>
       </div>
 
       <!-- Security Violations Tab -->
@@ -151,12 +151,12 @@
     setTimeout(() => t.style.display = 'none', 3000);
   }
 
-  function switchTab(tab) {
+  function switchTab(tab, clickedBtn) {
     currentTab = tab;
     
     // Update tab buttons
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    event.target.classList.add('active');
+    if (clickedBtn) clickedBtn.classList.add('active');
     
     // Update tab content
     document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));

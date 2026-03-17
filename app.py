@@ -563,8 +563,8 @@ def generate_frames():
 # =============================
 # ROUTES
 # =============================
-@app.get("/")
-def root():
+@app.get("/health")
+def health():
     return {"status": "running"}
 
 @app.get("/stream")
@@ -806,8 +806,8 @@ def employee_logout():
     # No specific session handling for employees, just return success
     return {"status": "success", "message": "Employee logged out successfully"}
 
-@app.post("/auth/admin/login")
-def auth_admin_login(data: dict = Body(...)):
+@app.post("/auth/admin/login-legacy")
+def auth_admin_login_legacy(data: dict = Body(...)):
     """Admin login endpoint"""
     global admin_logged_in
     
@@ -1088,7 +1088,7 @@ def tunnel_history():
 
 # Serve the employees page
 @app.get("/admin/employees", response_class=HTMLResponse)
-def admin_employees_page():
+def admin_employees_page_v2():
     """Serve the employee management page"""
     if not admin_logged_in:
         return HTMLResponse('<script>window.location.href="/admin/login";</script>')
@@ -1559,8 +1559,8 @@ async def update_employee_profile(
             "image_path": emp.image_path.replace("\\", "/") if emp.image_path else None
         }
 
-@app.post("/employee/update-profile")
-def update_employee_profile(data: dict = Body(...)):
+@app.post("/employee/update-profile-json")
+def update_employee_profile_json(data: dict = Body(...)):
     """Update employee profile"""
     emp_id = data.get("id")
     name = data.get("name")
@@ -1937,7 +1937,11 @@ def get_employee_logs(employee_id: int, start: Optional[str] = Query(None), end:
     end_exclusive = end_dt + timedelta(days=1) if end_dt else None
 
     with SessionLocal() as s:
-        stmt = select(Entry).where(Entry.names.like(f"%{employee_id}%"))
+        emp = s.get(Person, employee_id)
+        if not emp:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        stmt = select(Entry).where(Entry.names.contains(emp.name))
         if start_dt:
             stmt = stmt.where(Entry.time >= start_dt)
         if end_exclusive:
