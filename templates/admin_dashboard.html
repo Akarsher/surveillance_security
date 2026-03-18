@@ -268,6 +268,7 @@
       background: rgba(0,0,0,0.3);
     }
   </style>
+  <link rel="stylesheet" href="/static/pro-theme.css">
 </head>
 <body>
   <div class="container">
@@ -323,38 +324,6 @@
         <strong>Webcam:</strong> Built-in laptop camera<br>
         <strong>IP Camera:</strong> Tapo security camera (RTSP)
       </p>
-    </section>
-
-    <!-- Remote Access Section -->
-    <section class="section tunnel-section">
-      <h2>🌐 Remote Access</h2>
-      <p class="section-desc">Access your security system from anywhere</p>
-      
-      <div class="tunnel-card">
-        <div class="tunnel-status-row">
-          <div class="tunnel-indicator">
-            <span class="tunnel-dot" id="tunnelDot">●</span>
-            <span id="tunnelStatusText">Checking...</span>
-          </div>
-          <div class="tunnel-buttons">
-            <button class="btn btn-primary" id="tunnelStartBtn" onclick="startTunnel()">
-              🚀 Start Tunnel
-            </button>
-            <button class="btn btn-danger" id="tunnelStopBtn" onclick="stopTunnel()" style="display:none;">
-              ⏹️ Stop
-            </button>
-          </div>
-        </div>
-        
-        <div class="tunnel-url-box" id="tunnelUrlBox" style="display:none;">
-          <label>🔗 Public URL:</label>
-          <div class="tunnel-url-row">
-            <input type="text" id="tunnelUrlInput" class="input" readonly>
-            <button class="btn btn-secondary" onclick="copyTunnelUrl()">📋</button>
-            <button class="btn btn-secondary" onclick="openTunnelUrl()">🔗</button>
-          </div>
-        </div>
-      </div>
     </section>
 
     <!-- Remote Access Section -->
