@@ -216,7 +216,7 @@ def on_shutdown():
 # =============================
 CAMERA_CONFIG = {
     "type": None,  # Start with no camera selected
-    "rtsp_url": "rtsp://rishitj:rishitj1972@192.168.1.2:554/stream2",
+    "rtsp_url": "rtsp://rishitj:rishitj1972@192.168.1.2:554/stream1",
     "webcam_index": 0,
     "reconnect_delay": 5,
 }
@@ -770,6 +770,13 @@ def admin_dashboard():
         return FileResponse("templates/admin_login.html")
     return FileResponse("templates/admin_dashboard.html")
 
+@app.get("/admin/dashboard", response_class=HTMLResponse)
+def admin_dashboard_alias():
+    """Alias route for admin dashboard used by some legacy frontend flows."""
+    if not admin_logged_in:
+        return FileResponse("templates/admin_login.html")
+    return FileResponse("templates/admin_dashboard.html")
+
 @app.get("/admin/employees", response_class=HTMLResponse)
 def admin_employees_page():
     if not admin_logged_in:
@@ -785,13 +792,23 @@ def admin_logs_page():
 @app.post("/admin/login")
 def admin_login(data: dict = Body(...)):
     global admin_logged_in
-    if (
-        data.get("username") == ADMIN_USERNAME and
-        data.get("password") == ADMIN_PASSWORD
-    ):
+    username = data.get("username", "").strip()
+    password = data.get("password", "")
+    if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
         admin_logged_in = True
-        return {"status": "success"}
-    return {"status": "fail"}
+        return {
+            "status": "success",
+            "message": "Welcome, Admin!",
+            "redirect": "/admin",
+            "user": {
+                "username": ADMIN_USERNAME,
+                "role": "admin"
+            }
+        }
+    return JSONResponse(
+        {"status": "fail", "message": "Invalid admin credentials"},
+        status_code=401
+    )
 
 @app.post("/admin/logout")
 def admin_logout():
