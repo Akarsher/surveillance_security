@@ -17,6 +17,32 @@ from sqlalchemy.exc import IntegrityError
 from db import SessionLocal, init_db, Person, Event, Entry
 from cloudflare_tunnel import cf_tunnel
 from utils import hash_password, verify_password, generate_emp_id
+from twilio.rest import Client
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Twilio credentials
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
+ADMIN_PHONE_NUMBER = os.getenv("ADMIN_PHONE_NUMBER")
+
+# Initialize Twilio client
+twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+
+def send_sms(to: str, message: str):
+    """Send an SMS using Twilio"""
+    try:
+        message = twilio_client.messages.create(
+            body=message,
+            from_=TWILIO_PHONE_NUMBER,
+            to=to
+        )
+        print(f"SMS sent to {to}: {message.sid}")
+    except Exception as e:
+        print(f"Failed to send SMS to {to}: {e}")
 
 os.environ.setdefault("INSIGHTFACE_HOME", os.path.join(os.getcwd(), ".insightface"))
 
@@ -386,6 +412,8 @@ ALERT_DEBOUNCE_LIMIT = 3
 violation_counter = 0
 alert_active = False
 last_alert = None  # <-- cache last alert for new WS clients
+# Track alert timestamps
+alert_timestamps = []
 
 # =============================
 # CSV LOGGER
@@ -498,8 +526,30 @@ def generate_frames():
 
             # prioritize violations: restricted > unknown > authorized count
             # CHANGED: Now requires exactly 1 authorized person (was 2)
-            if r > 0:
+            if r > 0:  # Restricted person detected
                 reason = "Restricted person detected"
+                # Send SMS to restricted employees
+                restricted_names = [n for n, ro in zip(last_names, last_roles) if ro == "restricted"]
+                with SessionLocal() as s:
+                    for name in restricted_names:
+                        emp = s.query(Person).filter(Person.name == name).first()
+                        if emp and emp.mobile:
+                            send_sms(
+                                to=emp.mobile,
+                                message=f"Alert: You are not authorized to enter this room. Please leave immediately."
+                            )
+            elif u > 0 and a > 0:  # Unknown person detected with authorized person
+                reason = "Unknown person detected with authorized person"
+                # Send SMS to authorized employees
+                authorized_names = [n for n, ro in zip(last_names, last_roles) if ro == "authorized"]
+                with SessionLocal() as s:
+                    for name in authorized_names:
+                        emp = s.query(Person).filter(Person.name == name).first()
+                        if emp and emp.mobile:
+                            send_sms(
+                                to=emp.mobile,
+                                message=f"Alert: We noticed an unknown person's entry with your help. This is a serious situation. Please report to security."
+                            )
             elif u > 0:
                 reason = "Unknown person detected"
             elif a != 1:
@@ -530,14 +580,26 @@ def generate_frames():
             if violation_counter >= ALERT_DEBOUNCE_LIMIT and (not alert_active or reason != last_reason):
                 alert_active = True
                 last_reason = reason
-                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                snap_path = os.path.join(SNAPSHOT_DIR, f"alert_{ts}.jpg")
+                ts = datetime.now()
+                alert_timestamps.append(ts)
+
+                # Remove alerts older than 1 minute
+                alert_timestamps = [t for t in alert_timestamps if (ts - t).total_seconds() <= 60]
+
+                # If more than 3 alerts in the last minute, send SMS to admin
+                if len(alert_timestamps) > 3:
+                    send_sms(
+                        to=ADMIN_PHONE_NUMBER,
+                        message="Alert: Multiple security breaches detected within the last minute. Please report to the security room immediately."
+                    )
+
+                snap_path = os.path.join(SNAPSHOT_DIR, f"alert_{ts.strftime('%Y%m%d_%H%M%S')}.jpg")
                 cv2.imwrite(snap_path, frame)
 
                 log_event(reason, a, r, u, snap_path)
 
                 msg = {
-                    "time": ts,
+                    "time": ts.strftime("%Y%m%d_%H%M%S"),
                     "reason": reason,
                     "authorized": a,
                     "restricted": r,

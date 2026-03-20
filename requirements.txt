@@ -1,6 +1,11 @@
 fastapi
-uvicorn[standard]
-opencv-python
+uvicorn
+sqlalchemy
+python-dotenv
+twilio
+opencv-python-headless
 numpy
 anyio
 insightface
+onnxruntime
+cloudflare

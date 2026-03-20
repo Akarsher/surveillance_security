@@ -1,29 +1,72 @@
-# Surveillance Security System
-The system continuously monitors a live camera feed to detect and recognize individuals entering a secured area. It maintains a database of authorized and restricted persons. Through face recognition, it verifies identities in real time. The presence of any restricted or unknown person, automatically triggers an alarm alert and records the incident.
-## Key Features:
-- 1.	Real-Time Face Detection
-Detects all faces appearing in the camera frame using computer vision techniques.
-- 2.	Face Recognition and Verification
-Compares detected faces against a stored database of authorized and restricted individuals using face embeddings.
-- 3.	Access Constraint Checking
-o	Triggers alert if a group of people are detected.
-o	Immediately alerts if any restricted or unknown person enters the area.
-- 4.	Automatic Alert Generation
-o	Sound an alarm (buzzer / sound notification).
-o	Display a real-time alert on the dashboard.
-o	Capture and store snapshot evidence.
-- 5.	Logging and Report Generation
-o	Maintain time-stamped logs of all alerts and detections.
-o	Store camera frames and event details for later review.
-- 6.	User-Friendly Dashboard
-o	Live video monitoring.
-o	Add or remove authorized and restricted persons.
-o	Review past alerts and logs.
-- 7.	Scalability and Flexibility
-o	Can integrate multiple cameras.
-o	Can modify constraint rules as needed.
+# 🔐 Surveillance Security System
 
-## Optional GPU (CUDA)
-- Install a CUDA-enabled ONNX Runtime build: `pip install onnxruntime-gpu`
-- Ensure NVIDIA CUDA drivers/toolkit are installed for your GPU
-- The app auto-selects CUDA when available, otherwise uses CPU
+The **Surveillance Security System** is a real-time monitoring solution designed to enhance security in restricted areas. It leverages advanced **face recognition technology** to identify individuals and enforce access control policies.
+
+The system detects unauthorized access, generates instant alerts, logs all events, and provides an intuitive dashboard for administrators and employees.
+
+---
+
+## 🚀 Features
+
+### 🔹 Core Functionalities
+
+- **Real-Time Face Detection**
+  - Detects all faces from live camera feed using computer vision.
+
+- **Face Recognition & Verification**
+  - Matches detected faces with stored embeddings of authorized/restricted users.
+
+- **Access Control System**
+  - Alerts when:
+    - Restricted personnel enter unauthorized zones
+    - Unknown individuals appear
+    - Suspicious group entries occur
+
+- **Automatic Alert Generation**
+  - Buzzer / sound alert
+  - Dashboard notifications
+  - Snapshot capture for evidence
+
+- **Logging & Reporting**
+  - Time-stamped logs for all activities
+  - Export logs as CSV
+
+- **User Dashboards**
+  - **Admin Dashboard**
+    - Manage users (add/edit/delete)
+    - Monitor live feed
+    - View alerts and reports
+  - **Employee Dashboard**
+    - View profile and logs
+    - Update personal details
+
+- **SMS Notifications**
+  - Integrated with Twilio API
+  - Sends alerts for critical security events
+
+- **Scalable Architecture**
+  - Supports multiple cameras
+  - Configurable access policies
+
+---
+
+## 🛠️ Tech Stack
+
+- **Backend:** FastAPI (Python)
+- **Computer Vision:** OpenCV, Face Recognition
+- **Database:** MongoDB / SQL (based on implementation)
+- **Notifications:** Twilio API
+- **Frontend:** HTML, CSS, JavaScript
+- **Environment Management:** Python-dotenv
+
+---
+
+## ⚙️ Installation
+
+Clone the repository and install dependencies:
+
+```bash
+git clone https://github.com/your-repo/surveillance-security-system.git
+cd surveillance-security-system
+pip install -r requirements.txt
+uvicorn app:app --reload
