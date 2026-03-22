@@ -28,21 +28,69 @@ TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
 ADMIN_PHONE_NUMBER = os.getenv("ADMIN_PHONE_NUMBER")
+DEFAULT_COUNTRY_CODE = os.getenv("DEFAULT_COUNTRY_CODE", "+91")
+
+
+def normalize_phone_number(phone: Optional[str], default_country_code: str = DEFAULT_COUNTRY_CODE) -> Optional[str]:
+    """Normalize local numbers to E.164-like format expected by Twilio."""
+    if not phone:
+        return None
+
+    raw = str(phone).strip()
+    if not raw:
+        return None
+
+    # Keep a single leading plus and digits only.
+    has_plus = raw.startswith("+")
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if not digits:
+        return None
+
+    if has_plus:
+        return f"+{digits}"
+
+    # Convert Indian-style local 10-digit numbers by default.
+    if len(digits) == 10 and default_country_code:
+        cc_digits = "".join(ch for ch in str(default_country_code) if ch.isdigit())
+        if cc_digits:
+            return f"+{cc_digits}{digits}"
+
+    # If already has country code digits without +, just prefix it.
+    if len(digits) >= 11:
+        return f"+{digits}"
+
+    return None
 
 # Initialize Twilio client
 twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
 def send_sms(to: str, message: str):
     """Send an SMS using Twilio"""
+    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or not TWILIO_PHONE_NUMBER:
+        print("[SMS] Twilio is not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER")
+        return False
+
+    normalized_to = normalize_phone_number(to)
+    normalized_from = normalize_phone_number(TWILIO_PHONE_NUMBER)
+
+    if not normalized_to:
+        print(f"[SMS] Invalid destination phone number: {to}")
+        return False
+    if not normalized_from:
+        print(f"[SMS] Invalid Twilio sender phone number: {TWILIO_PHONE_NUMBER}")
+        return False
+
     try:
-        message = twilio_client.messages.create(
+        sent = twilio_client.messages.create(
             body=message,
-            from_=TWILIO_PHONE_NUMBER,
-            to=to
+            from_=normalized_from,
+            to=normalized_to
         )
-        print(f"SMS sent to {to}: {message.sid}")
+        print(f"[SMS] Sent to {normalized_to}: {sent.sid}")
+        return True
     except Exception as e:
-        print(f"Failed to send SMS to {to}: {e}")
+        print(f"[SMS] Failed to send SMS to {normalized_to}: {e}")
+        return False
 
 os.environ.setdefault("INSIGHTFACE_HOME", os.path.join(os.getcwd(), ".insightface"))
 
@@ -453,7 +501,7 @@ def log_entry(count: int, names: list):
 # MJPEG STREAM
 # =============================
 def generate_frames():
-    global violation_counter, alert_active, last_alert
+    global violation_counter, alert_active, last_alert, alert_timestamps
     process_every_n_frames = 5
     frame_count = 0
     last_locs, last_names, last_roles = [], [], []
@@ -523,33 +571,14 @@ def generate_frames():
 
             # Get authorized names for entry logging
             auth_names = [n for n, ro in zip(last_names, last_roles) if ro == "authorized"]
+            restricted_names = [n for n, ro in zip(last_names, last_roles) if ro == "restricted"]
 
             # prioritize violations: restricted > unknown > authorized count
             # CHANGED: Now requires exactly 1 authorized person (was 2)
             if r > 0:  # Restricted person detected
                 reason = "Restricted person detected"
-                # Send SMS to restricted employees
-                restricted_names = [n for n, ro in zip(last_names, last_roles) if ro == "restricted"]
-                with SessionLocal() as s:
-                    for name in restricted_names:
-                        emp = s.query(Person).filter(Person.name == name).first()
-                        if emp and emp.mobile:
-                            send_sms(
-                                to=emp.mobile,
-                                message=f"Alert: You are not authorized to enter this room. Please leave immediately."
-                            )
             elif u > 0 and a > 0:  # Unknown person detected with authorized person
                 reason = "Unknown person detected with authorized person"
-                # Send SMS to authorized employees
-                authorized_names = [n for n, ro in zip(last_names, last_roles) if ro == "authorized"]
-                with SessionLocal() as s:
-                    for name in authorized_names:
-                        emp = s.query(Person).filter(Person.name == name).first()
-                        if emp and emp.mobile:
-                            send_sms(
-                                to=emp.mobile,
-                                message=f"Alert: We noticed an unknown person's entry with your help. This is a serious situation. Please report to security."
-                            )
             elif u > 0:
                 reason = "Unknown person detected"
             elif a != 1:
@@ -583,11 +612,39 @@ def generate_frames():
                 ts = datetime.now()
                 alert_timestamps.append(ts)
 
+                # Send targeted notifications once per alert trigger.
+                if reason == "Restricted person detected":
+                    with SessionLocal() as s:
+                        for name in restricted_names:
+                            emp = s.query(Person).filter(Person.name == name).first()
+                            if emp and emp.mobile:
+                                send_sms(
+                                    to=emp.mobile,
+                                    message="Alert: You are not authorized to enter this room. Please leave immediately."
+                                )
+
+                    if ADMIN_PHONE_NUMBER:
+                        send_sms(
+                            to=ADMIN_PHONE_NUMBER,
+                            message=f"Critical Alert: Restricted person detected at {ts.strftime('%H:%M:%S')}. Please report to the security room immediately."
+                        )
+
+                elif reason == "Unknown person detected with authorized person":
+                    authorized_names = [n for n, ro in zip(last_names, last_roles) if ro == "authorized"]
+                    with SessionLocal() as s:
+                        for name in authorized_names:
+                            emp = s.query(Person).filter(Person.name == name).first()
+                            if emp and emp.mobile:
+                                send_sms(
+                                    to=emp.mobile,
+                                    message="Alert: We noticed an unknown person's entry with your help. This is a serious situation. Please report to security."
+                                )
+
                 # Remove alerts older than 1 minute
                 alert_timestamps = [t for t in alert_timestamps if (ts - t).total_seconds() <= 60]
 
                 # If more than 3 alerts in the last minute, send SMS to admin
-                if len(alert_timestamps) > 3:
+                if len(alert_timestamps) > 3 and ADMIN_PHONE_NUMBER:
                     send_sms(
                         to=ADMIN_PHONE_NUMBER,
                         message="Alert: Multiple security breaches detected within the last minute. Please report to the security room immediately."
