@@ -1,8 +1,8 @@
 import cv2
 import os
 import csv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse, HTMLResponse, FileResponse, JSONResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi.responses import StreamingResponse, HTMLResponse, FileResponse, JSONResponse, RedirectResponse
 from datetime import datetime, timedelta
 import anyio
 from fastapi.staticfiles import StaticFiles
@@ -99,6 +99,12 @@ import onnxruntime as ort
 
 app = FastAPI()
 
+ADMIN_AUTH_COOKIE = "admin_auth"
+
+
+def redirect_to_admin_login() -> RedirectResponse:
+    return RedirectResponse(url="/login?type=admin", status_code=302)
+
 # Init InsightFace (use env var for portability)
 available_providers = ort.get_available_providers()
 use_cuda = "CUDAExecutionProvider" in available_providers
@@ -110,6 +116,16 @@ ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "admin123"
 
 admin_logged_in = False
+
+
+@app.middleware("http")
+async def sync_admin_auth_from_cookie(request: Request, call_next):
+    """Keep in-memory admin state aligned with cookie-based auth across workers."""
+    global admin_logged_in
+    if request.cookies.get(ADMIN_AUTH_COOKIE) == "1":
+        admin_logged_in = True
+    response = await call_next(request)
+    return response
 
 # =============================
 # PATHS
@@ -699,7 +715,7 @@ def stream():
 def stream_view():
     """Stream page with security camera UI overlay"""
     if not admin_logged_in:
-        return FileResponse("templates/admin_login.html")
+        return redirect_to_admin_login()
     return FileResponse("templates/stream.html")
 
 @app.websocket("/ws/alerts")
@@ -886,26 +902,26 @@ def admin_entries_export(start: Optional[str] = Query(None), end: Optional[str] 
 @app.get("/admin", response_class=HTMLResponse)
 def admin_dashboard():
     if not admin_logged_in:
-        return FileResponse("templates/admin_login.html")
+        return redirect_to_admin_login()
     return FileResponse("templates/admin_dashboard.html")
 
 @app.get("/admin/dashboard", response_class=HTMLResponse)
 def admin_dashboard_alias():
     """Alias route for admin dashboard used by some legacy frontend flows."""
     if not admin_logged_in:
-        return FileResponse("templates/admin_login.html")
+        return redirect_to_admin_login()
     return FileResponse("templates/admin_dashboard.html")
 
 @app.get("/admin/employees", response_class=HTMLResponse)
 def admin_employees_page():
     if not admin_logged_in:
-        return FileResponse("templates/admin_login.html")
+        return redirect_to_admin_login()
     return FileResponse("templates/admin_employees.html")
 
 @app.get("/admin/logs", response_class=HTMLResponse)
 def admin_logs_page():
     if not admin_logged_in:
-        return FileResponse("templates/admin_login.html")
+        return redirect_to_admin_login()
     return FileResponse("templates/admin_logs.html")
 
 @app.post("/admin/login")
@@ -915,7 +931,7 @@ def admin_login(data: dict = Body(...)):
     password = data.get("password", "")
     if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
         admin_logged_in = True
-        return {
+        response = JSONResponse({
             "status": "success",
             "message": "Welcome, Admin!",
             "redirect": "/admin",
@@ -923,7 +939,9 @@ def admin_login(data: dict = Body(...)):
                 "username": ADMIN_USERNAME,
                 "role": "admin"
             }
-        }
+        })
+        response.set_cookie(ADMIN_AUTH_COOKIE, "1", httponly=True, samesite="lax")
+        return response
     return JSONResponse(
         {"status": "fail", "message": "Invalid admin credentials"},
         status_code=401
@@ -934,7 +952,9 @@ def admin_logout():
     """Logout admin and clear session"""
     global admin_logged_in
     admin_logged_in = False
-    return {"status": "success", "message": "Admin logged out successfully"}
+    response = JSONResponse({"status": "success", "message": "Admin logged out successfully"})
+    response.delete_cookie(ADMIN_AUTH_COOKIE)
+    return response
 
 @app.post("/employee/logout")
 def employee_logout():
@@ -952,7 +972,7 @@ def auth_admin_login_legacy(data: dict = Body(...)):
     
     if username == "admin" and password == "admin123":
         admin_logged_in = True
-        return {
+        response = JSONResponse({
             "status": "success",
             "message": "Welcome, Admin!",
             "redirect": "/admin",  # Ensure this is included
@@ -960,7 +980,9 @@ def auth_admin_login_legacy(data: dict = Body(...)):
                 "username": "admin",
                 "role": "admin"
             }
-        }
+        })
+        response.set_cookie(ADMIN_AUTH_COOKIE, "1", httponly=True, samesite="lax")
+        return response
     
     return JSONResponse(
         {"status": "fail", "message": "Invalid admin credentials"},
@@ -1221,15 +1243,6 @@ def tunnel_history():
 # =============================
 # EMPLOYEE MANAGEMENT ENDPOINTS
 # =============================
-
-# Serve the employees page
-@app.get("/admin/employees", response_class=HTMLResponse)
-def admin_employees_page_v2():
-    """Serve the employee management page"""
-    if not admin_logged_in:
-        return HTMLResponse('<script>window.location.href="/admin/login";</script>')
-    return FileResponse("templates/admin_employees.html")
-
 
 # Static routes FIRST (before dynamic routes)
 @app.get("/admin/employees/list")
@@ -1746,7 +1759,7 @@ def auth_admin_login(data: dict = Body(...)):
     # Check admin credentials (you can change these)
     if username == "admin" and password == "admin123":
         admin_logged_in = True
-        return {
+        response = JSONResponse({
             "status": "success",
             "message": "Welcome, Admin!",
             "redirect": "/admin",
@@ -1754,7 +1767,9 @@ def auth_admin_login(data: dict = Body(...)):
                 "username": "admin",
                 "role": "admin"
             }
-        }
+        })
+        response.set_cookie(ADMIN_AUTH_COOKIE, "1", httponly=True, samesite="lax")
+        return response
     
     return JSONResponse(
         {"status": "fail", "message": "Invalid admin credentials"},
