@@ -17,6 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from db import SessionLocal, init_db, Person, Event, Entry
 from cloudflare_tunnel import cf_tunnel
 from utils import hash_password, verify_password, generate_emp_id
+from liveness import MiniFASNetLiveness
 from twilio.rest import Client
 from dotenv import load_dotenv
 
@@ -29,6 +30,33 @@ TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
 ADMIN_PHONE_NUMBER = os.getenv("ADMIN_PHONE_NUMBER")
 DEFAULT_COUNTRY_CODE = os.getenv("DEFAULT_COUNTRY_CODE", "+91")
+
+
+def env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
+def env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
 
 
 def normalize_phone_number(phone: Optional[str], default_country_code: str = DEFAULT_COUNTRY_CODE) -> Optional[str]:
@@ -115,7 +143,33 @@ face_app.prepare(ctx_id=0 if use_cuda else -1, det_size=(640, 640))
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "admin123"
 
+LIVENESS_ENABLED = env_bool("LIVENESS_ENABLED", True)
+LIVENESS_STRICT = env_bool("LIVENESS_STRICT", True)
+LIVENESS_MODEL_PATH = os.getenv("LIVENESS_MODEL_PATH", os.path.join("models", "liveness", "liveness_model.onnx"))
+LIVENESS_MODEL_PATHS = os.getenv("LIVENESS_MODEL_PATHS", LIVENESS_MODEL_PATH)
+LIVENESS_MODEL_SCALES = os.getenv("LIVENESS_MODEL_SCALES", "")
+LIVENESS_THRESHOLD = env_float("LIVENESS_THRESHOLD", 0.9)
+LIVENESS_LIVE_CLASS_INDEX = env_int("LIVENESS_LIVE_CLASS_INDEX", 1)
+LIVENESS_CROP_SCALE = env_float("LIVENESS_CROP_SCALE", 2.7)
+
 admin_logged_in = False
+
+liveness_detector = MiniFASNetLiveness(
+    model_path=LIVENESS_MODEL_PATHS,
+    threshold=LIVENESS_THRESHOLD,
+    live_class_index=LIVENESS_LIVE_CLASS_INDEX,
+    strict=LIVENESS_STRICT,
+    enabled=LIVENESS_ENABLED,
+    crop_scale=LIVENESS_CROP_SCALE,
+    model_scales=LIVENESS_MODEL_SCALES,
+    providers=providers,
+)
+
+if LIVENESS_ENABLED:
+    if liveness_detector.ready:
+        print(f"[Liveness] MiniFASNet ready: {LIVENESS_MODEL_PATHS}")
+    else:
+        print(f"[Liveness] MiniFASNet unavailable: {liveness_detector.error_message}")
 
 
 @app.middleware("http")
@@ -521,8 +575,9 @@ def generate_frames():
     process_every_n_frames = 5
     frame_count = 0
     last_locs, last_names, last_roles = [], [], []
+    last_spoof_flags, last_spoof_scores = [], []
     reason = ""
-    a = r = u = 0
+    a = r = u = spoof_count = 0
     last_reason = None
     consecutive_failures = 0
     last_entry_logged = None  # Track last entry to avoid duplicate logs
@@ -557,6 +612,7 @@ def generate_frames():
         if frame_count % process_every_n_frames == 0:
             # detect + recognize (populate last_names/last_roles)
             last_locs, last_names, last_roles = [], [], []
+            last_spoof_flags, last_spoof_scores = [], []
             small = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
             faces = face_app.get(small)
 
@@ -566,6 +622,8 @@ def generate_frames():
                 x1, y1, x2, y2 = bbox[0], bbox[1], bbox[2], bbox[3]
                 emb = f.normed_embedding
                 name, role = "Unknown", "unknown"
+                is_spoof = False
+                spoof_score = None
 
                 if emb is not None and enc_mat is not None:
                     sims = enc_mat @ emb.astype(np.float32)
@@ -575,12 +633,28 @@ def generate_frames():
                         name = known_names[i]
                         role = known_roles[i]
 
+                if LIVENESS_ENABLED:
+                    liveness = liveness_detector.predict(frame, bbox)
+                    if liveness.get("ok", False):
+                        if not liveness.get("is_live", True):
+                            is_spoof = True
+                            spoof_score = liveness.get("score")
+                    elif LIVENESS_STRICT:
+                        # In strict mode, treat unavailable liveness checks as a warning risk.
+                        is_spoof = True
+
+                if is_spoof:
+                    role = "spoof"
+
                 # Store as (x1, y1, x2, y2) for clarity
                 last_locs.append((x1, y1, x2, y2))
                 last_names.append(name)
                 last_roles.append(role)
+                last_spoof_flags.append(is_spoof)
+                last_spoof_scores.append(spoof_score)
 
             # recompute counts every processed frame
+            spoof_count = sum(1 for flag in last_spoof_flags if flag)
             a = sum(1 for rr in last_roles if rr == "authorized")
             r = sum(1 for rr in last_roles if rr == "restricted")
             u = sum(1 for rr in last_roles if rr not in ("authorized", "restricted"))
@@ -591,7 +665,9 @@ def generate_frames():
 
             # prioritize violations: restricted > unknown > authorized count
             # CHANGED: Now requires exactly 1 authorized person (was 2)
-            if r > 0:  # Restricted person detected
+            if spoof_count > 0:
+                reason = "Spoof detected"
+            elif r > 0:  # Restricted person detected
                 reason = "Restricted person detected"
             elif u > 0 and a > 0:  # Unknown person detected with authorized person
                 reason = "Unknown person detected with authorized person"
@@ -645,6 +721,13 @@ def generate_frames():
                             message=f"Critical Alert: Restricted person detected at {ts.strftime('%H:%M:%S')}. Please report to the security room immediately."
                         )
 
+                elif reason == "Spoof detected":
+                    if ADMIN_PHONE_NUMBER:
+                        send_sms(
+                            to=ADMIN_PHONE_NUMBER,
+                            message=f"Warning: Spoof face detected at {ts.strftime('%H:%M:%S')}. Please verify camera feed immediately."
+                        )
+
                 elif reason == "Unknown person detected with authorized person":
                     authorized_names = [n for n, ro in zip(last_names, last_roles) if ro == "authorized"]
                     with SessionLocal() as s:
@@ -677,6 +760,7 @@ def generate_frames():
                     "authorized": a,
                     "restricted": r,
                     "unknown": u,
+                    "spoof": spoof_count,
                     "snapshot": f"snapshots/{os.path.basename(snap_path)}"
                 }
                 last_alert = msg
@@ -684,12 +768,23 @@ def generate_frames():
                 print("[ALERT]", reason)
 
         # draw overlays (uses latest last_*)
-        for (x1, y1, x2, y2), name, role in zip(last_locs, last_names, last_roles):
+        for (x1, y1, x2, y2), name, role, is_spoof, spoof_score in zip(last_locs, last_names, last_roles, last_spoof_flags, last_spoof_scores):
             color = (0, 255, 0) if role == "authorized" else (0, 165, 255) if role == "restricted" else (0, 0, 255)
+            if is_spoof:
+                color = (0, 255, 255)
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             # Draw name above the box with better visibility
             label_y = max(y1 - 10, 20)
-            cv2.putText(frame, name, (x1, label_y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+            label = name
+            if is_spoof:
+                if spoof_score is not None:
+                    label = f"{name} | SPOOF ({spoof_score:.2f})"
+                else:
+                    label = f"{name} | SPOOF"
+            cv2.putText(frame, label, (x1, label_y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+
+        if any(last_spoof_flags):
+            cv2.putText(frame, "WARNING: SPOOF DETECTED", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 3)
 
         # yield MJPEG chunk
         ret, buffer = cv2.imencode('.jpg', frame)
@@ -1856,6 +1951,30 @@ async def auth_face_login(image: UploadFile = File(...)):
     
     # Get largest face
     face = max(faces, key=lambda f: (f.bbox[2]-f.bbox[0])*(f.bbox[3]-f.bbox[1]))
+
+    liveness = liveness_detector.predict(img, face.bbox)
+    if not liveness.get("ok", False) and LIVENESS_STRICT and LIVENESS_ENABLED:
+        return JSONResponse(
+            {
+                "status": "fail",
+                "message": "Liveness check unavailable. Please contact admin.",
+                "liveness": liveness,
+            },
+            status_code=503,
+        )
+    if liveness.get("ok", False) and not liveness.get("is_live", True):
+        return JSONResponse(
+            {
+                "status": "fail",
+                "message": "Spoof attack detected. Please use a live face.",
+                "liveness": {
+                    "score": liveness.get("score"),
+                    "threshold": liveness.get("threshold"),
+                },
+            },
+            status_code=401,
+        )
+
     emb = face.normed_embedding
     
     if emb is None:
@@ -1896,7 +2015,12 @@ async def auth_face_login(image: UploadFile = File(...)):
                     "image_path": best_match.image_path.replace("\\", "/") if best_match.image_path else None,
                     "role": best_match.role
                 },
-                "confidence": float(best_score)
+                "confidence": float(best_score),
+                "liveness": {
+                    "score": liveness.get("score"),
+                    "threshold": liveness.get("threshold"),
+                    "is_live": liveness.get("is_live", True),
+                },
             }
     
     return JSONResponse(
@@ -2015,6 +2139,30 @@ async def employee_face_attendance(
         )
     
     face = max(faces, key=lambda f: (f.bbox[2]-f.bbox[0])*(f.bbox[3]-f.bbox[1]))
+
+    liveness = liveness_detector.predict(img, face.bbox)
+    if not liveness.get("ok", False) and LIVENESS_STRICT and LIVENESS_ENABLED:
+        return JSONResponse(
+            {
+                "status": "fail",
+                "message": "Liveness check unavailable. Please contact admin.",
+                "liveness": liveness,
+            },
+            status_code=503,
+        )
+    if liveness.get("ok", False) and not liveness.get("is_live", True):
+        return JSONResponse(
+            {
+                "status": "fail",
+                "message": "Spoof attack detected. Attendance blocked.",
+                "liveness": {
+                    "score": liveness.get("score"),
+                    "threshold": liveness.get("threshold"),
+                },
+            },
+            status_code=401,
+        )
+
     emb = face.normed_embedding
     
     if emb is None:

@@ -16,6 +16,9 @@ The system detects unauthorized access, generates instant alerts, logs all event
 - **Face Recognition & Verification**
   - Matches detected faces with stored embeddings of authorized/restricted users.
 
+- **Liveness Detection (MiniFASNet, ONNX)**
+  - Blocks spoof attempts (photo/screen replay) during face login and face attendance.
+
 - **Access Control System**
   - Alerts when:
     - Restricted personnel enter unauthorized zones
@@ -70,3 +73,18 @@ git clone https://github.com/your-repo/surveillance-security-system.git
 cd surveillance-security-system
 pip install -r requirements.txt
 uvicorn app:app --reload
+
+### Liveness Model Setup
+
+Place your MiniFASNet ONNX model at:
+
+`models/liveness/liveness_model.onnx`
+
+Optional environment variables:
+
+- `LIVENESS_ENABLED=true`
+- `LIVENESS_STRICT=false`
+- `LIVENESS_MODEL_PATH=models/liveness/liveness_model.onnx`
+- `LIVENESS_THRESHOLD=0.80`
+- `LIVENESS_LIVE_CLASS_INDEX=1`
+- `LIVENESS_CROP_SCALE=2.7`
