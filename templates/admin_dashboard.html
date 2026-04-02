@@ -566,7 +566,9 @@
       snapshotLink.style.display = 'none';
     }
     
-    document.getElementById('alertPopup').style.display = 'flex';
+    const popup = document.getElementById('alertPopup');
+    popup.setAttribute('data-alert-id', data.id);
+    popup.style.display = 'flex';
     
     // Shake effect
     document.body.classList.add('alert-shake');
@@ -582,7 +584,16 @@
   }
 
   function dismissAlert() {
-    document.getElementById('alertPopup').style.display = 'none';
+    const popup = document.getElementById('alertPopup');
+    const alertId = popup.getAttribute('data-alert-id');
+    
+    // Mark this alert as acknowledged
+    if (alertId) {
+      acknowledgedAlerts.add(alertId);
+      console.log('Alert acknowledged:', alertId);
+    }
+    
+    popup.style.display = 'none';
   }
 
   function dismissBanner() {
@@ -792,6 +803,10 @@
       if (data.status === 'success') {
         showToast('Camera stopped successfully', true);
         showError(null);
+        
+        // Clear acknowledged alerts since camera is stopped
+        acknowledgedAlerts.clear();
+        console.log('Cleared acknowledged alerts on camera stop');
       } else {
         showToast('Failed to stop camera', false);
       }
@@ -840,6 +855,8 @@
   // =============================
   // WEBSOCKET ALERTS
   // =============================
+  let acknowledgedAlerts = new Set();
+  
   (function setupAlertsWS() {
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(`${scheme}://${location.host}/ws/alerts`);
@@ -856,6 +873,12 @@
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       
+      // Skip already acknowledged alerts
+      if (acknowledgedAlerts.has(data.id)) {
+        console.log('Skipping acknowledged alert:', data.id);
+        return;
+      }
+      
       // Update banner
       text.textContent = `${data.reason} — Auth:${data.authorized} Restr:${data.restricted} Unk:${data.unknown}`;
       banner.style.display = 'flex';
@@ -863,7 +886,7 @@
       // Play alert sound
       playAlertSound();
       
-      // Show popup
+      // Show popup with alert ID
       showAlertPopup(data);
     };
 

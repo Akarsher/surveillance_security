@@ -664,7 +664,9 @@ def generate_frames():
             restricted_names = [n for n, ro in zip(last_names, last_roles) if ro == "restricted"]
 
             # prioritize violations: restricted > unknown > authorized count
+            # Only alert if at least one face is detected (a + r + u > 0)
             # CHANGED: Now requires exactly 1 authorized person (was 2)
+            total_faces = a + r + u
             if spoof_count > 0:
                 reason = "Spoof detected"
             elif r > 0:  # Restricted person detected
@@ -673,7 +675,8 @@ def generate_frames():
                 reason = "Unknown person detected with authorized person"
             elif u > 0:
                 reason = "Unknown person detected"
-            elif a != 1:
+            elif total_faces > 0 and a != 1:
+                # Only alert on wrong authorized count if faces were actually detected
                 reason = f"Authorized count = {a}"
             else:
                 reason = ""
@@ -754,7 +757,11 @@ def generate_frames():
 
                 log_event(reason, a, r, u, snap_path)
 
+                # Create unique alert ID from timestamp and reason
+                alert_id = ts.strftime("%Y%m%d_%H%M%S") + "_" + reason.replace(" ", "_")[:20]
+                
                 msg = {
+                    "id": alert_id,
                     "time": ts.strftime("%Y%m%d_%H%M%S"),
                     "reason": reason,
                     "authorized": a,
