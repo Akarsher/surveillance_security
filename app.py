@@ -1475,11 +1475,11 @@ async def add_employee(
             emp_id=emp_id,
             username=username,
             password=hashed_password,
-            mobile=mobile if mobile else None,
-            email=email if email else None,
+            mobile=mobile.strip() if mobile and mobile.strip() else None,
+            email=email.strip() if email and email.strip() else None,
             role=role,
-            designation=designation if designation else None,
-            department=department if department else None,
+            designation=designation.strip() if designation and designation.strip() else None,
+            department=department.strip() if department and department.strip() else None,
             image_path=img_path,
             embedding=np_to_blob(emb),
             is_active=1
@@ -1682,8 +1682,12 @@ def employee_login(data: dict = Body(...)):
                 "name": emp.name,
                 "emp_id": emp.emp_id,
                 "username": emp.username,
+                "mobile": emp.mobile,
+                "email": emp.email,
                 "designation": emp.designation,
-                "department": emp.department
+                "department": emp.department,
+                "image_path": emp.image_path.replace("\\", "/") if emp.image_path else None,
+                "role": emp.role
             }
         }
 
@@ -1925,6 +1929,8 @@ def auth_employee_login(data: dict = Body(...)):
                 "name": emp.name,
                 "emp_id": emp.emp_id,
                 "username": emp.username,
+                "mobile": emp.mobile,
+                "email": emp.email,
                 "designation": emp.designation,
                 "department": emp.department,
                 "image_path": emp.image_path.replace("\\", "/") if emp.image_path else None,
