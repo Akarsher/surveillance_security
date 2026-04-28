@@ -581,6 +581,12 @@ def generate_frames():
     last_reason = None
     consecutive_failures = 0
     last_entry_logged = None  # Track last entry to avoid duplicate logs
+    
+    # Temporal smoothing buffers for spoof detection
+    # Maps face identity -> buffer of (is_spoof, score) tuples
+    liveness_history = {}
+    LIVENESS_BUFFER_SIZE = 2  # Need 2 frames for consensus (faster than 3)
+    SPOOF_SCORE_THRESHOLD = 0.5  # Score below this = likely spoof
 
     while camera.running:
         # Check if camera is active
@@ -635,13 +641,80 @@ def generate_frames():
 
                 if LIVENESS_ENABLED:
                     liveness = liveness_detector.predict(frame, bbox)
+                    frame_quality = liveness.get("frame_quality", {})
+                    quality_ok = frame_quality.get("quality_ok", True)
+                    
                     if liveness.get("ok", False):
-                        if not liveness.get("is_live", True):
+                        # Extract liveness info
+                        is_live = liveness.get("is_live", True)
+                        score = liveness.get("score", 1.0)
+                        
+                        # Use face name/identity as key for history tracking
+                        face_key = f"{name}_{x1}_{y1}"  # Combine name and position
+                        
+                        # Initialize history buffer if needed
+                        if face_key not in liveness_history:
+                            liveness_history[face_key] = []
+                        
+                        # Add current frame result to history
+                        liveness_history[face_key].append({
+                            "is_live": is_live,
+                            "score": score,
+                            "quality_ok": quality_ok
+                        })
+                        
+                        # Keep only recent history
+                        if len(liveness_history[face_key]) > LIVENESS_BUFFER_SIZE:
+                            liveness_history[face_key] = liveness_history[face_key][-LIVENESS_BUFFER_SIZE:]
+                        
+                        # Aggressive detection with fast path
+                        # Fast path: if score is very low (strong spoof signal), trust it immediately
+                        if score < 0.3:
                             is_spoof = True
-                            spoof_score = liveness.get("score")
+                            spoof_score = score
+                        # If we have history, use voting but be sensitive
+                        elif len(liveness_history[face_key]) >= LIVENESS_BUFFER_SIZE:
+                            # Decision: mark spoof if majority says not live OR if any frame has low score
+                            spoof_votes = sum(1 for h in liveness_history[face_key] if not h["is_live"])
+                            low_scores = sum(1 for h in liveness_history[face_key] if h["score"] < SPOOF_SCORE_THRESHOLD)
+                            
+                            # Mark as spoof if:
+                            # - ANY frame has very low score (< 0.3 caught above)
+                            # - Majority votes not live
+                            # - Multiple frames have low scores
+                            if spoof_votes >= 1 or low_scores >= 2:
+                                is_spoof = True
+                                spoof_score = sum(h["score"] for h in liveness_history[face_key]) / len(liveness_history[face_key])
+                            else:
+                                is_spoof = False
+                                spoof_score = sum(h["score"] for h in liveness_history[face_key]) / len(liveness_history[face_key])
+                        else:
+                            # Not enough history - be somewhat permissive but still flag very low scores
+                            if score < SPOOF_SCORE_THRESHOLD or not is_live:
+                                # Need to see this pattern in next frame
+                                is_spoof = False  # Don't mark yet, but watch
+                                spoof_score = score
+                            else:
+                                is_spoof = False
+                                spoof_score = score
                     elif LIVENESS_STRICT:
-                        # In strict mode, treat unavailable liveness checks as a warning risk.
-                        is_spoof = True
+                        # In strict mode, multiple failed inferences = likely spoof
+                        face_key = f"{name}_{x1}_{y1}"
+                        if face_key not in liveness_history:
+                            liveness_history[face_key] = []
+                        
+                        liveness_history[face_key].append({
+                            "is_live": False,
+                            "score": 0.0,
+                            "quality_ok": False
+                        })
+                        
+                        if len(liveness_history[face_key]) > LIVENESS_BUFFER_SIZE:
+                            liveness_history[face_key] = liveness_history[face_key][-LIVENESS_BUFFER_SIZE:]
+                        
+                        # Mark spoof if multiple frames fail
+                        if len(liveness_history[face_key]) >= 2:
+                            is_spoof = True
 
                 if is_spoof:
                     role = "spoof"
@@ -652,6 +725,12 @@ def generate_frames():
                 last_roles.append(role)
                 last_spoof_flags.append(is_spoof)
                 last_spoof_scores.append(spoof_score)
+            
+            # Clean up old history entries (faces no longer in frame)
+            current_face_keys = set(f"{name}_{x1}_{y1}" for name, (x1, y1, _, _) in zip(last_names, last_locs))
+            stale_keys = set(liveness_history.keys()) - current_face_keys
+            for key in stale_keys:
+                del liveness_history[key]
 
             # recompute counts every processed frame
             spoof_count = sum(1 for flag in last_spoof_flags if flag)

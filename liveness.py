@@ -109,6 +109,64 @@ class MiniFASNetLiveness:
             return np.zeros_like(x)
         return ex / denom
 
+    @staticmethod
+    def _detect_frame_quality(image: np.ndarray, bbox: Any) -> Dict[str, Any]:
+        """Detect frame quality issues: blur, low contrast, corruption, flat surfaces (phone screens)."""
+        if bbox is None or len(bbox) < 4:
+            return {"quality_ok": False, "issues": ["invalid_bbox"]}
+
+        h, w = image.shape[:2]
+        x1, y1, x2, y2 = [int(v) for v in bbox[:4]]
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w, x2), min(h, y2)
+
+        if x2 <= x1 or y2 <= y1:
+            return {"quality_ok": False, "issues": ["invalid_crop"]}
+
+        face_roi = image[y1:y2, x1:x2]
+        if face_roi.size == 0:
+            return {"quality_ok": False, "issues": ["empty_crop"]}
+
+        issues = []
+
+        # Check for blur using Laplacian variance
+        laplacian_var = None
+        if face_roi.shape[0] > 10 and face_roi.shape[1] > 10:
+            gray = cv2.cvtColor(face_roi, cv2.COLOR_BGR2GRAY) if len(face_roi.shape) == 3 else face_roi
+            laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+            if laplacian_var < 100:  # Low variance = likely blurred
+                issues.append("blur_detected")
+
+        # Check for low contrast
+        if face_roi.size > 0:
+            gray = cv2.cvtColor(face_roi, cv2.COLOR_BGR2GRAY) if len(face_roi.shape) == 3 else face_roi
+            contrast = gray.std()
+            if contrast < 15:  # Very low std = likely washed out or stuck
+                issues.append("low_contrast")
+
+        # Check for uniform color (stuck frame or flat surface like phone screen)
+        if face_roi.size > 0 and len(face_roi.shape) == 3:
+            # Reshape to get unique colors more efficiently
+            pixels = face_roi.reshape(-1, 3)
+            unique_colors = len(np.unique(pixels, axis=0))
+            total_pixels = face_roi.shape[0] * face_roi.shape[1]
+            
+            # Phone screens and printed images have very low color diversity
+            if unique_colors < total_pixels * 0.08:  # <8% color variety = likely non-face
+                issues.append("flat_surface_or_uniform")
+            
+            # Additional check: phone screens often have limited color ranges
+            # Check for artificial/printed colors (high saturation patterns)
+            hsv = cv2.cvtColor(face_roi, cv2.COLOR_BGR2HSV)
+            saturation = hsv[:, :, 1]
+            # Phone screens often have very high saturation spikes (printed colors)
+            high_sat_pixels = np.sum(saturation > 240)
+            if high_sat_pixels > total_pixels * 0.15:  # >15% pixels with extreme saturation
+                issues.append("artificial_colors_detected")
+
+        quality_ok = len(issues) == 0
+        return {"quality_ok": quality_ok, "issues": issues, "blur_var": laplacian_var}
+
     def _crop_face(self, image: np.ndarray, bbox: Any, scale: float) -> Optional[np.ndarray]:
         if bbox is None or len(bbox) < 4:
             return None
@@ -151,6 +209,7 @@ class MiniFASNetLiveness:
                 "score": 1.0,
                 "threshold": self.threshold,
                 "reason": "disabled",
+                "frame_quality": {"quality_ok": True, "issues": []},
             }
 
         if not self.ready or not self.sessions:
@@ -160,9 +219,13 @@ class MiniFASNetLiveness:
                 "score": 0.0,
                 "threshold": self.threshold,
                 "reason": self.error_message or "model not ready",
+                "frame_quality": {"quality_ok": False, "issues": ["model_not_ready"]},
             }
 
         try:
+            # Check frame quality first
+            frame_quality = self._detect_frame_quality(image, bbox)
+
             fused_probs = None
             per_model = []
 
@@ -192,6 +255,7 @@ class MiniFASNetLiveness:
                             "score": 0.0,
                             "threshold": self.threshold,
                             "reason": "model output class mismatch",
+                            "frame_quality": frame_quality,
                         }
                     fused_probs += probs
 
@@ -210,6 +274,7 @@ class MiniFASNetLiveness:
                     "score": 0.0,
                     "threshold": self.threshold,
                     "reason": "invalid face crop or empty model output",
+                    "frame_quality": frame_quality,
                 }
 
             label = int(np.argmax(fused_probs))
@@ -230,6 +295,7 @@ class MiniFASNetLiveness:
                 "fused_probs": (fused_probs / len(per_model)).tolist(),
                 "per_model": per_model,
                 "reason": "ok",
+                "frame_quality": frame_quality,
             }
         except Exception as exc:  # pragma: no cover - runtime inference guard
             return {
@@ -238,4 +304,5 @@ class MiniFASNetLiveness:
                 "score": 0.0,
                 "threshold": self.threshold,
                 "reason": f"inference failed: {exc}",
+                "frame_quality": {"quality_ok": False, "issues": ["inference_error"]},
             }
